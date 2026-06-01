@@ -13,11 +13,13 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-func startWebServer(cfg *Config, cfgPath string, state *Progress, progressPath string, logger *LogBroadcaster, port string) {
-	h := NewHandlers(cfg, cfgPath, state, progressPath, logger)
+func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath string, state *Progress, progressPath string, logger *LogBroadcaster, port string) {
+	h := NewHandlers(apiCfg, apiCfgPath, cfg, cfgPath, state, progressPath, logger)
 
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/config/api", h.GetAPIConfig)
+	mux.HandleFunc("PUT /api/config/api", h.PutAPIConfig)
 	mux.HandleFunc("GET /api/config", h.GetConfig)
 	mux.HandleFunc("PUT /api/config", h.PutConfig)
 	mux.HandleFunc("GET /api/progress", h.GetProgress)

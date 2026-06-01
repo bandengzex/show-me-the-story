@@ -26,14 +26,14 @@ type ContinueChapter struct {
 	Content string `json:"content,omitempty"`
 }
 
-func AnalyzeExistingContent(cfg *Config, content string) (*ContinueAnalysis, error) {
+func AnalyzeExistingContent(apiCfg *APIConfig, cfg *Config, content string) (*ContinueAnalysis, error) {
 	userPrompt := RenderPrompt(cfg.Prompts.ContentAnalysis, map[string]string{
 		"ExistingContent": content,
 	})
 
 	systemPrompt := "你是一位专业的小说分析编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetry(cfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetry(apiCfg, systemPrompt, userPrompt)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ContinueAnalysis
@@ -136,7 +136,7 @@ func ImportContinueAction(cfg *Config, state *Progress, analysis *ContinueAnalys
 	return nil
 }
 
-func GenerateContinuationOutline(cfg *Config, state *Progress, newChapterCount int, progressPath string, logger *LogBroadcaster) error {
+func GenerateContinuationOutline(apiCfg *APIConfig, cfg *Config, state *Progress, newChapterCount int, progressPath string, logger *LogBroadcaster) error {
 	logger.StepInfo(1, 2, "正在构建已有章节上下文...")
 
 	existingOutline := ""
@@ -170,7 +170,7 @@ func GenerateContinuationOutline(cfg *Config, state *Progress, newChapterCount i
 
 	systemPrompt := "你是一位专业的小说策划编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetryLog(cfg, systemPrompt, userPrompt, logger)
+	rawResp := CallAPIWithRetryLog(apiCfg, systemPrompt, userPrompt, logger)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp OutlineResponse

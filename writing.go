@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func GenerateChapterAction(cfg *Config, state *Progress, progressPath string, logger *LogBroadcaster) error {
+func GenerateChapterAction(apiCfg *APIConfig, cfg *Config, state *Progress, progressPath string, logger *LogBroadcaster) error {
 	if state.Phase != "writing" {
 		return fmt.Errorf("当前不在写作阶段")
 	}
@@ -33,18 +33,18 @@ func GenerateChapterAction(cfg *Config, state *Progress, progressPath string, lo
 	maxFactCheckRetries := 3
 	for attempt := 0; attempt <= maxFactCheckRetries; attempt++ {
 		logger.StepInfo(1, 4, "正在构思并撰写正文...")
-		content := generateChapterContentStreamWithRetryLog(cfg, state, i, logger)
+		content := generateChapterContentStreamWithRetryLog(apiCfg, cfg, state, i, logger)
 		ch.Content = content
 		logger.Info(fmt.Sprintf("正文撰写完毕，共 %d 字", len([]rune(content))))
 
 		logger.StepInfo(2, 4, "正在提炼本章摘要...")
-		summary := generateChapterSummaryWithRetryLog(cfg, content, logger)
+		summary := generateChapterSummaryWithRetryLog(apiCfg, cfg, content, logger)
 		ch.Summary = summary
 		logger.Info("摘要提炼完成")
 
 		logger.StepInfo(3, 4, "正在对本章进行事实核查...")
 		historySummary := buildHistorySummary(state, i)
-		factCheckResult := generateChapterFactCheckWithRetryLog(cfg, content, historySummary, logger)
+		factCheckResult := generateChapterFactCheckWithRetryLog(apiCfg, cfg, content, historySummary, logger)
 
 		if strings.Contains(factCheckResult, "FAIL") {
 			if attempt < maxFactCheckRetries {
@@ -61,7 +61,7 @@ func GenerateChapterAction(cfg *Config, state *Progress, progressPath string, lo
 
 	if len(state.Foreshadows) > 0 {
 		logger.StepInfo(4, 4, "正在更新伏笔状态...")
-		if err := UpdateForeshadows(cfg, state, i, logger); err != nil {
+		if err := UpdateForeshadows(apiCfg, cfg, state, i, logger); err != nil {
 			logger.Warn(fmt.Sprintf("伏笔状态更新失败: %v（不影响本章）", err))
 		} else {
 			active := 0
@@ -94,7 +94,7 @@ func GenerateChapterAction(cfg *Config, state *Progress, progressPath string, lo
 	return nil
 }
 
-func ReviseChapterAction(cfg *Config, state *Progress, progressPath, feedback string, logger *LogBroadcaster) error {
+func ReviseChapterAction(apiCfg *APIConfig, cfg *Config, state *Progress, progressPath, feedback string, logger *LogBroadcaster) error {
 	if state.Phase != "writing" {
 		return fmt.Errorf("当前不在写作阶段")
 	}
@@ -112,7 +112,7 @@ func ReviseChapterAction(cfg *Config, state *Progress, progressPath, feedback st
 	logger.Info(fmt.Sprintf("正在修改第 %d 章《%s》...", ch.Num, ch.Title))
 
 	logger.StepInfo(1, 3, "正在根据意见重写正文...")
-	revisedContent, err := reviseChapterContentStream(cfg, state, chapterIdx, feedback, logger)
+	revisedContent, err := reviseChapterContentStream(apiCfg, cfg, state, chapterIdx, feedback, logger)
 	if err != nil {
 		return fmt.Errorf("修改章节失败: %w", err)
 	}
@@ -120,14 +120,14 @@ func ReviseChapterAction(cfg *Config, state *Progress, progressPath, feedback st
 	logger.Info(fmt.Sprintf("正文修改完毕，共 %d 字", len([]rune(revisedContent))))
 
 	logger.StepInfo(2, 3, "重新提炼摘要...")
-	ch.Summary = generateChapterSummaryWithRetryLog(cfg, ch.Content, logger)
+	ch.Summary = generateChapterSummaryWithRetryLog(apiCfg, cfg, ch.Content, logger)
 	logger.Info("摘要提炼完成")
 
 	SaveChapterMarkdown(*ch, state.Title)
 
 	if chapterIdx+1 < len(state.Chapters) {
 		logger.StepInfo(3, 3, "正在修订后续章节大纲...")
-		if err := reviseSubsequentOutlines(cfg, state, chapterIdx, feedback); err != nil {
+		if err := reviseSubsequentOutlines(apiCfg, cfg, state, chapterIdx, feedback); err != nil {
 			logger.Warn(fmt.Sprintf("后续大纲修订失败: %v（不影响当前章节）", err))
 		} else {
 			logger.Info("后续大纲修订完成")
@@ -163,7 +163,7 @@ func ConfirmChapterAction(state *Progress, progressPath string) error {
 	return SaveProgress(progressPath, state)
 }
 
-func generateChapterContent(cfg *Config, state *Progress, idx int) (string, error) {
+func generateChapterContent(apiCfg *APIConfig, cfg *Config, state *Progress, idx int) (string, error) {
 	ch := state.Chapters[idx]
 
 	historySummary := buildHistorySummary(state, idx)
@@ -195,10 +195,10 @@ func generateChapterContent(cfg *Config, state *Progress, idx int) (string, erro
 		systemPrompt = "你是一位小说作者。"
 	}
 
-	return CallAPI(cfg, systemPrompt, userPrompt)
+	return CallAPI(apiCfg, systemPrompt, userPrompt)
 }
 
-func generateChapterContentStream(cfg *Config, state *Progress, idx int, logger *LogBroadcaster) (string, error) {
+func generateChapterContentStream(apiCfg *APIConfig, cfg *Config, state *Progress, idx int, logger *LogBroadcaster) (string, error) {
 	ch := state.Chapters[idx]
 
 	historySummary := buildHistorySummary(state, idx)
@@ -241,13 +241,13 @@ func generateChapterContentStream(cfg *Config, state *Progress, idx int, logger 
 		}
 	}
 
-	return CallAPIStream(cfg, systemPrompt, userPrompt, onChunk)
+	return CallAPIStream(apiCfg, systemPrompt, userPrompt, onChunk)
 }
 
-func generateChapterContentWithRetry(cfg *Config, state *Progress, idx int) string {
+func generateChapterContentWithRetry(apiCfg *APIConfig, cfg *Config, state *Progress, idx int) string {
 	retryCount := 0
 	for {
-		content, err := generateChapterContent(cfg, state, idx)
+		content, err := generateChapterContent(apiCfg, cfg, state, idx)
 		if err == nil && content != "" {
 			return content
 		}
@@ -259,10 +259,10 @@ func generateChapterContentWithRetry(cfg *Config, state *Progress, idx int) stri
 	}
 }
 
-func generateChapterContentStreamWithRetry(cfg *Config, state *Progress, idx int, logger *LogBroadcaster) string {
+func generateChapterContentStreamWithRetry(apiCfg *APIConfig, cfg *Config, state *Progress, idx int, logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		content, err := generateChapterContentStream(cfg, state, idx, logger)
+		content, err := generateChapterContentStream(apiCfg, cfg, state, idx, logger)
 		if err == nil && content != "" {
 			return content
 		}
@@ -274,10 +274,10 @@ func generateChapterContentStreamWithRetry(cfg *Config, state *Progress, idx int
 	}
 }
 
-func generateChapterContentStreamWithRetryLog(cfg *Config, state *Progress, idx int, logger *LogBroadcaster) string {
+func generateChapterContentStreamWithRetryLog(apiCfg *APIConfig, cfg *Config, state *Progress, idx int, logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		content, err := generateChapterContentStream(cfg, state, idx, logger)
+		content, err := generateChapterContentStream(apiCfg, cfg, state, idx, logger)
 		if err == nil && content != "" {
 			return content
 		}
@@ -289,19 +289,19 @@ func generateChapterContentStreamWithRetryLog(cfg *Config, state *Progress, idx 
 	}
 }
 
-func generateChapterSummary(cfg *Config, content string) (string, error) {
+func generateChapterSummary(apiCfg *APIConfig, cfg *Config, content string) (string, error) {
 	userPrompt := RenderPrompt(cfg.Prompts.ChapterSummary, map[string]string{
 		"ChapterContent": content,
 	})
 
 	systemPrompt := "你是一位精准的小说叙事状态分析师。"
-	return CallAPI(cfg, systemPrompt, userPrompt)
+	return CallAPI(apiCfg, systemPrompt, userPrompt)
 }
 
-func generateChapterSummaryWithRetry(cfg *Config, content string) string {
+func generateChapterSummaryWithRetry(apiCfg *APIConfig, cfg *Config, content string) string {
 	retryCount := 0
 	for {
-		summary, err := generateChapterSummary(cfg, content)
+		summary, err := generateChapterSummary(apiCfg, cfg, content)
 		if err == nil && summary != "" {
 			return summary
 		}
@@ -313,10 +313,10 @@ func generateChapterSummaryWithRetry(cfg *Config, content string) string {
 	}
 }
 
-func generateChapterSummaryWithRetryLog(cfg *Config, content string, logger *LogBroadcaster) string {
+func generateChapterSummaryWithRetryLog(apiCfg *APIConfig, cfg *Config, content string, logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		summary, err := generateChapterSummary(cfg, content)
+		summary, err := generateChapterSummary(apiCfg, cfg, content)
 		if err == nil && summary != "" {
 			return summary
 		}
@@ -328,7 +328,7 @@ func generateChapterSummaryWithRetryLog(cfg *Config, content string, logger *Log
 	}
 }
 
-func generateChapterFactCheck(cfg *Config, content string, historySummary string) (string, error) {
+func generateChapterFactCheck(apiCfg *APIConfig, cfg *Config, content string, historySummary string) (string, error) {
 	userPrompt := RenderPrompt(cfg.Prompts.FactCheck, map[string]string{
 		"ChapterContent": content,
 		"HistorySummary": historySummary,
@@ -336,13 +336,13 @@ func generateChapterFactCheck(cfg *Config, content string, historySummary string
 	})
 
 	systemPrompt := "你是一位严谨的小说事实核查员。请严格按照要求的JSON格式输出。"
-	return CallAPI(cfg, systemPrompt, userPrompt)
+	return CallAPI(apiCfg, systemPrompt, userPrompt)
 }
 
-func generateChapterFactCheckWithRetry(cfg *Config, content string, historySummary string) string {
+func generateChapterFactCheckWithRetry(apiCfg *APIConfig, cfg *Config, content string, historySummary string) string {
 	retryCount := 0
 	for {
-		result, err := generateChapterFactCheck(cfg, content, historySummary)
+		result, err := generateChapterFactCheck(apiCfg, cfg, content, historySummary)
 		if err == nil && result != "" {
 			return result
 		}
@@ -354,10 +354,10 @@ func generateChapterFactCheckWithRetry(cfg *Config, content string, historySumma
 	}
 }
 
-func generateChapterFactCheckWithRetryLog(cfg *Config, content string, historySummary string, logger *LogBroadcaster) string {
+func generateChapterFactCheckWithRetryLog(apiCfg *APIConfig, cfg *Config, content string, historySummary string, logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		result, err := generateChapterFactCheck(cfg, content, historySummary)
+		result, err := generateChapterFactCheck(apiCfg, cfg, content, historySummary)
 		if err == nil && result != "" {
 			return result
 		}
@@ -369,7 +369,7 @@ func generateChapterFactCheckWithRetryLog(cfg *Config, content string, historySu
 	}
 }
 
-func reviseChapterContent(cfg *Config, state *Progress, chapterIdx int, userFeedback string) (string, error) {
+func reviseChapterContent(apiCfg *APIConfig, cfg *Config, state *Progress, chapterIdx int, userFeedback string) (string, error) {
 	ch := state.Chapters[chapterIdx]
 
 	historySummary := buildHistorySummary(state, chapterIdx)
@@ -392,10 +392,10 @@ func reviseChapterContent(cfg *Config, state *Progress, chapterIdx int, userFeed
 		state.CorePrompt, state.CoreRequirements,
 		historySummary, ch.Outline, userFeedback)
 
-	return CallAPI(cfg, systemPrompt, userPrompt)
+	return CallAPI(apiCfg, systemPrompt, userPrompt)
 }
 
-func reviseChapterContentStream(cfg *Config, state *Progress, chapterIdx int, userFeedback string, logger *LogBroadcaster) (string, error) {
+func reviseChapterContentStream(apiCfg *APIConfig, cfg *Config, state *Progress, chapterIdx int, userFeedback string, logger *LogBroadcaster) (string, error) {
 	ch := state.Chapters[chapterIdx]
 
 	historySummary := buildHistorySummary(state, chapterIdx)
@@ -429,10 +429,10 @@ func reviseChapterContentStream(cfg *Config, state *Progress, chapterIdx int, us
 		}
 	}
 
-	return CallAPIStream(cfg, systemPrompt, userPrompt, onChunk)
+	return CallAPIStream(apiCfg, systemPrompt, userPrompt, onChunk)
 }
 
-func reviseSubsequentOutlines(cfg *Config, state *Progress, currentIdx int, userFeedback string) error {
+func reviseSubsequentOutlines(apiCfg *APIConfig, cfg *Config, state *Progress, currentIdx int, userFeedback string) error {
 	subsequentChapters := ""
 	for i := currentIdx + 1; i < len(state.Chapters); i++ {
 		ch := state.Chapters[i]
@@ -458,7 +458,7 @@ func reviseSubsequentOutlines(cfg *Config, state *Progress, currentIdx int, user
 
 	systemPrompt := "你是一位小说策划编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。已锁定的章节内容不可修改。"
 
-	rawResp := CallAPIWithRetry(cfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetry(apiCfg, systemPrompt, userPrompt)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp OutlineResponse

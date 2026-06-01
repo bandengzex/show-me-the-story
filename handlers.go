@@ -8,19 +8,23 @@ import (
 )
 
 type Handlers struct {
-	cfg          *Config
-	cfgPath      string
-	state        *Progress
+	apiCfg     *APIConfig
+	apiCfgPath string
+	cfg        *Config
+	cfgPath    string
+	state      *Progress
 	progressPath string
-	logger       *LogBroadcaster
-	taskMu       sync.Mutex
-	taskRunning  bool
+	logger     *LogBroadcaster
+	taskMu     sync.Mutex
+	taskRunning bool
 
 	pendingContinueContent string
 }
 
-func NewHandlers(cfg *Config, cfgPath string, state *Progress, progressPath string, logger *LogBroadcaster) *Handlers {
+func NewHandlers(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath string, state *Progress, progressPath string, logger *LogBroadcaster) *Handlers {
 	return &Handlers{
+		apiCfg:       apiCfg,
+		apiCfgPath:   apiCfgPath,
 		cfg:          cfg,
 		cfgPath:      cfgPath,
 		state:        state,
@@ -61,6 +65,35 @@ func (h *Handlers) isTaskRunning() bool {
 	return h.taskRunning
 }
 
+func (h *Handlers) GetAPIConfig(w http.ResponseWriter, r *http.Request) {
+	h.writeJSON(w, http.StatusOK, h.apiCfg)
+}
+
+func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
+	var newCfg APIConfig
+	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+		h.writeError(w, http.StatusBadRequest, "无效的JSON: "+err.Error())
+		return
+	}
+
+	if newCfg.HTTPTimeoutSeconds <= 0 {
+		newCfg.HTTPTimeoutSeconds = 300
+	}
+
+	data, err := json.MarshalIndent(newCfg, "", "  ")
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "序列化API配置失败: "+err.Error())
+		return
+	}
+	if err := writeFileAtomic(h.apiCfgPath, data); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "保存API配置失败: "+err.Error())
+		return
+	}
+
+	h.apiCfg = &newCfg
+	h.writeJSON(w, http.StatusOK, h.apiCfg)
+}
+
 func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.cfg)
 }
@@ -72,22 +105,11 @@ func (h *Handlers) PutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if newCfg.BaseURL == "" {
-		h.writeError(w, http.StatusBadRequest, "缺少 base_url")
-		return
-	}
-	if newCfg.Model == "" {
-		h.writeError(w, http.StatusBadRequest, "缺少 model")
-		return
-	}
 	if newCfg.Story.ChapterCount <= 0 {
 		newCfg.Story.ChapterCount = 30
 	}
 	if newCfg.Story.TargetWordsPerChapter <= 0 {
 		newCfg.Story.TargetWordsPerChapter = 2500
-	}
-	if newCfg.HTTPTimeoutSeconds <= 0 {
-		newCfg.HTTPTimeoutSeconds = 300
 	}
 	newCfg.Prompts.applyDefaults()
 
@@ -134,7 +156,7 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 		h.logger.TaskStart("outline_generation")
 
 		h.logger.Info("正在生成小说大纲...")
-		err := GenerateOutlineAction(h.cfg, h.state, h.progressPath, h.logger)
+		err := GenerateOutlineAction(h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
 
 		if err != nil {
 			h.endTask()
@@ -196,7 +218,7 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 		h.logger.TaskStart("outline_revision")
 
 		h.logger.Info("正在根据意见修订大纲...")
-		err := ReviseOutlineAction(h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
+		err := ReviseOutlineAction(h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
 
 		if err != nil {
 			h.endTask()
@@ -230,7 +252,7 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.logger.Info(fmt.Sprintf("正在创作第 %d 章...", chIdx+1))
-		err := GenerateChapterAction(h.cfg, h.state, h.progressPath, h.logger)
+		err := GenerateChapterAction(h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
 
 		if err != nil {
 			h.endTask()
@@ -288,7 +310,7 @@ func (h *Handlers) PostChapterRevise(w http.ResponseWriter, r *http.Request) {
 		h.logger.TaskStart("chapter_revision")
 
 		h.logger.Info("正在根据意见修改当前章节...")
-		err := ReviseChapterAction(h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
+		err := ReviseChapterAction(h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
 
 		if err != nil {
 			h.endTask()
@@ -434,7 +456,7 @@ func (h *Handlers) PostForeshadowsSuggest(w http.ResponseWriter, r *http.Request
 		h.logger.TaskStart("foreshadow_suggest")
 
 		h.logger.Info("正在分析大纲，设计伏笔方案...")
-		suggestions, err := SuggestForeshadows(h.cfg, h.state, h.logger)
+		suggestions, err := SuggestForeshadows(h.apiCfg, h.cfg, h.state, h.logger)
 
 		if err != nil {
 			h.endTask()
@@ -629,7 +651,7 @@ func (h *Handlers) PostContinueImport(w http.ResponseWriter, r *http.Request) {
 		h.logger.TaskStart("continue_analysis")
 
 		h.logger.Info("正在分析已有内容...")
-		analysis, err := AnalyzeExistingContent(h.cfg, body.Content)
+		analysis, err := AnalyzeExistingContent(h.apiCfg, h.cfg, body.Content)
 
 		if err != nil {
 			h.endTask()
@@ -711,7 +733,7 @@ func (h *Handlers) PostOutlineGenerateContinuation(w http.ResponseWriter, r *htt
 		h.logger.TaskStart("continuation_outline")
 
 		h.logger.Info("正在生成续写大纲...")
-		err := GenerateContinuationOutline(h.cfg, h.state, body.ChapterCount, h.progressPath, h.logger)
+		err := GenerateContinuationOutline(h.apiCfg, h.cfg, h.state, body.ChapterCount, h.progressPath, h.logger)
 
 		if err != nil {
 			h.endTask()
@@ -786,5 +808,3 @@ func deleteFile(path string) error {
 func renameFile(old, new string) error {
 	return renameFileImpl(old, new)
 }
-
-

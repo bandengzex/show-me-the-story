@@ -28,7 +28,7 @@ type ForeshadowUpdateResponse struct {
 	Updates []ForeshadowUpdateItem `json:"updates"`
 }
 
-func SuggestForeshadows(cfg *Config, state *Progress, logger *LogBroadcaster) ([]ForeshadowSuggestion, error) {
+func SuggestForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, logger *LogBroadcaster) ([]ForeshadowSuggestion, error) {
 	snapshot := state.StoryConfigSnapshot
 	if snapshot == nil {
 		snapshot = &cfg.Story
@@ -50,7 +50,7 @@ func SuggestForeshadows(cfg *Config, state *Progress, logger *LogBroadcaster) ([
 
 	systemPrompt := "你是一位资深的小说叙事架构师。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetryLog(cfg, systemPrompt, userPrompt, logger)
+	rawResp := CallAPIWithRetryLog(apiCfg, systemPrompt, userPrompt, logger)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ForeshadowPlanResponse
@@ -62,7 +62,7 @@ func SuggestForeshadows(cfg *Config, state *Progress, logger *LogBroadcaster) ([
 	return resp.Foreshadows, nil
 }
 
-func UpdateForeshadows(cfg *Config, state *Progress, chapterIdx int, logger *LogBroadcaster) error {
+func UpdateForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, chapterIdx int, logger *LogBroadcaster) error {
 	ch := state.Chapters[chapterIdx]
 
 	foreshadowsText := formatForeshadowsForPrompt(state.Foreshadows)
@@ -90,7 +90,7 @@ func UpdateForeshadows(cfg *Config, state *Progress, chapterIdx int, logger *Log
 
 	systemPrompt := "你是一位严谨的小说伏笔追踪员。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetryLog(cfg, systemPrompt, userPrompt, logger)
+	rawResp := CallAPIWithRetryLog(apiCfg, systemPrompt, userPrompt, logger)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ForeshadowUpdateResponse

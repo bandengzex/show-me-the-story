@@ -8,7 +8,7 @@
 
 - **Go 版本**：1.25.1
 - **模块名**：`showmethestory`
-- **默认端口**：`:8080`（可通过 `PORT` 环境变量覆盖）
+- **默认端口**：`:6090`（可通过 `PORT` 环境变量覆盖）
 
 ## 编译与运行
 
@@ -45,8 +45,8 @@ go build -o show-me-the-story.exe .   # 编译
 
 | 文件 | 职责 |
 |------|------|
-| `main.go` | 入口，加载配置/进度，启动 Web 服务器 |
-| `config.go` | `Config`、`StoryConfig`、`PromptsConfig` 结构体，`LoadConfig`、`saveConfig`、`applyDefaults` |
+| `main.go` | 入口，加载API配置/故事配置/进度，启动 Web 服务器 |
+| `config.go` | `APIConfig`、`Config`、`StoryConfig`、`PromptsConfig` 结构体，`LoadAPIConfig`、`LoadConfig`、`saveAPIConfig`、`saveConfig`、`applyDefaults` |
 | `state.go` | `Progress`、`ChapterState`、`Foreshadow` 结构体，`LoadProgress`、`SaveProgress`、`SaveChapterMarkdown` |
 | `api.go` | `CallAPI`（同步）、`CallAPIStream`（流式）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog` |
 | `outline.go` | `generateOutline`、`reviseOutline`、`GenerateOutlineAction`、`ReviseOutlineAction`、`ConfirmOutlineAction`、`cleanJSONResponse` |
@@ -97,6 +97,10 @@ userPrompt := RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 
 模板中用 `{{.KeyName}}` 作为占位符。新增 prompt 变量必须遵循此约定。
 
+### 双配置结构
+
+API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保存为 `api.json` 和 `config.json`。所有 AI 调用函数接收 `*APIConfig`，故事相关函数同时接收 `*APIConfig` 和 `*Config`。
+
 ### API 调用重试
 
 `CallAPIWithRetry` / `CallAPIStreamWithRetry` 为无限重试 + 指数退避（最大 30s）。带 `Log` 后缀的变体通过 SSE 推送重试信息。
@@ -122,7 +126,7 @@ planted → progressing → resolved
 
 ### 进度持久化
 
-每个关键步骤后立即保存 `progress.json`。配置变更保存 `config.json`。使用原子写入（先写 `.tmp` 再 rename）。
+每个关键步骤后立即保存 `progress.json`。API 配置保存 `api.json`，故事配置保存 `config.json`。使用原子写入（先写 `.tmp` 再 rename）。
 
 ## 续写功能流程
 
@@ -142,8 +146,10 @@ planted → progressing → resolved
 
 | 方法 | 路径 | 同步/异步 | 说明 |
 |------|------|----------|------|
-| GET | `/api/config` | 同步 | 获取配置 |
-| PUT | `/api/config` | 同步 | 保存配置 |
+| GET | `/api/config/api` | 同步 | 获取 API 配置 |
+| PUT | `/api/config/api` | 同步 | 保存 API 配置 |
+| GET | `/api/config` | 同步 | 获取故事配置 |
+| PUT | `/api/config` | 同步 | 保存故事配置 |
 | GET | `/api/progress` | 同步 | 获取进度 |
 | DELETE | `/api/progress` | 同步 | 重置进度 |
 | GET | `/api/status` | 同步 | 获取状态摘要 |

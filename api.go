@@ -41,11 +41,11 @@ func normalizeURL(base string) string {
 	return base + "/chat/completions"
 }
 
-func CallAPI(cfg *Config, system, user string) (string, error) {
-	fullURL := normalizeURL(cfg.BaseURL)
+func CallAPI(apiCfg *APIConfig, system, user string) (string, error) {
+	fullURL := normalizeURL(apiCfg.BaseURL)
 
 	reqBody := ChatRequest{
-		Model: cfg.Model,
+		Model: apiCfg.Model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -63,11 +63,11 @@ func CallAPI(cfg *Config, system, user string) (string, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	if apiCfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiCfg.APIKey)
 	}
 
-	timeout := time.Duration(cfg.HTTPTimeoutSeconds) * time.Second
+	timeout := time.Duration(apiCfg.HTTPTimeoutSeconds) * time.Second
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -95,10 +95,10 @@ func CallAPI(cfg *Config, system, user string) (string, error) {
 	return "", fmt.Errorf("接口未响应有效 Choices 文本")
 }
 
-func CallAPIWithRetry(cfg *Config, system, user string) string {
+func CallAPIWithRetry(apiCfg *APIConfig, system, user string) string {
 	retryCount := 0
 	for {
-		result, err := CallAPI(cfg, system, user)
+		result, err := CallAPI(apiCfg, system, user)
 		if err == nil && result != "" {
 			return result
 		}
@@ -110,10 +110,10 @@ func CallAPIWithRetry(cfg *Config, system, user string) string {
 	}
 }
 
-func CallAPIWithRetryLog(cfg *Config, system, user string, logger *LogBroadcaster) string {
+func CallAPIWithRetryLog(apiCfg *APIConfig, system, user string, logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		result, err := CallAPI(cfg, system, user)
+		result, err := CallAPI(apiCfg, system, user)
 		if err == nil && result != "" {
 			return result
 		}
@@ -140,11 +140,11 @@ type streamDelta struct {
 	} `json:"choices"`
 }
 
-func CallAPIStream(cfg *Config, system, user string, onChunk func(string)) (string, error) {
-	fullURL := normalizeURL(cfg.BaseURL)
+func CallAPIStream(apiCfg *APIConfig, system, user string, onChunk func(string)) (string, error) {
+	fullURL := normalizeURL(apiCfg.BaseURL)
 
 	reqBody := ChatRequest{
-		Model: cfg.Model,
+		Model: apiCfg.Model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -163,11 +163,11 @@ func CallAPIStream(cfg *Config, system, user string, onChunk func(string)) (stri
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	if apiCfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiCfg.APIKey)
 	}
 
-	timeout := time.Duration(cfg.HTTPTimeoutSeconds) * time.Second
+	timeout := time.Duration(apiCfg.HTTPTimeoutSeconds) * time.Second
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -213,10 +213,10 @@ func CallAPIStream(cfg *Config, system, user string, onChunk func(string)) (stri
 	return result, nil
 }
 
-func CallAPIStreamWithRetry(cfg *Config, system, user string, onChunk func(string)) string {
+func CallAPIStreamWithRetry(apiCfg *APIConfig, system, user string, onChunk func(string)) string {
 	retryCount := 0
 	for {
-		result, err := CallAPIStream(cfg, system, user, onChunk)
+		result, err := CallAPIStream(apiCfg, system, user, onChunk)
 		if err == nil && result != "" {
 			return result
 		}
@@ -228,10 +228,10 @@ func CallAPIStreamWithRetry(cfg *Config, system, user string, onChunk func(strin
 	}
 }
 
-func CallAPIStreamWithRetryLog(cfg *Config, system, user string, onChunk func(string), logger *LogBroadcaster) string {
+func CallAPIStreamWithRetryLog(apiCfg *APIConfig, system, user string, onChunk func(string), logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		result, err := CallAPIStream(cfg, system, user, onChunk)
+		result, err := CallAPIStream(apiCfg, system, user, onChunk)
 		if err == nil && result != "" {
 			return result
 		}

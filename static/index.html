@@ -123,6 +123,9 @@ main.active{display:block}
 <input id="cfgTimeout" type="number" value="300">
 </div>
 </div>
+<div class="btn-group">
+<button class="btn btn-primary" onclick="saveAPIConfig()">保存 API 配置</button>
+</div>
 </div>
 <div class="panel">
 <h2>故事配置</h2>
@@ -164,7 +167,7 @@ main.active{display:block}
 <textarea id="cfgCoreRequirements" placeholder="其他核心写作要求..."></textarea>
 </div>
 <div class="btn-group">
-<button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+<button class="btn btn-primary" onclick="saveStoryConfig()">保存故事配置</button>
 </div>
 </div>
 </main>
@@ -319,6 +322,7 @@ main.active{display:block}
 <script>
 const App={
   progress:null,
+  apiConfig:null,
   config:null,
   taskRunning:false,
   currentPage:'config',
@@ -329,6 +333,7 @@ const App={
   continueAnalysis:null,
   init(){
     this.connectSSE();
+    this.loadAPIConfig();
     this.loadConfig();
     this.loadProgress();
     this.setupNav();
@@ -447,13 +452,31 @@ const App={
     if(!r.ok)throw new Error(data.error||'请求失败');
     return data;
   },
+  async loadAPIConfig(){
+    try{
+      this.apiConfig=await this.api('GET','/api/config/api');
+      document.getElementById('cfgBaseURL').value=this.apiConfig.base_url||'';
+      document.getElementById('cfgModel').value=this.apiConfig.model||'';
+      document.getElementById('cfgAPIKey').value=this.apiConfig.api_key||'';
+      document.getElementById('cfgTimeout').value=this.apiConfig.http_timeout_seconds||300;
+    }catch(e){console.error('loadAPIConfig:',e)}
+  },
+  async saveAPIConfig(){
+    const cfg={
+      api_key:document.getElementById('cfgAPIKey').value,
+      base_url:document.getElementById('cfgBaseURL').value,
+      model:document.getElementById('cfgModel').value,
+      http_timeout_seconds:parseInt(document.getElementById('cfgTimeout').value)||300
+    };
+    try{
+      await this.api('PUT','/api/config/api',cfg);
+      this.toast('API 配置已保存','success');
+      this.apiConfig=cfg;
+    }catch(e){this.toast(e.message,'error')}
+  },
   async loadConfig(){
     try{
       this.config=await this.api('GET','/api/config');
-      document.getElementById('cfgBaseURL').value=this.config.base_url||'';
-      document.getElementById('cfgModel').value=this.config.model||'';
-      document.getElementById('cfgAPIKey').value=this.config.api_key||'';
-      document.getElementById('cfgTimeout').value=this.config.http_timeout_seconds||300;
       const s=this.config.story||{};
       document.getElementById('cfgStoryType').value=s.type||'';
       document.getElementById('cfgStoryTitle').value=s.title||'';
@@ -465,12 +488,8 @@ const App={
       document.getElementById('cfgCoreRequirements').value=s.core_requirements||'';
     }catch(e){console.error('loadConfig:',e)}
   },
-  async saveConfig(){
+  async saveStoryConfig(){
     const cfg={
-      api_key:document.getElementById('cfgAPIKey').value,
-      base_url:document.getElementById('cfgBaseURL').value,
-      model:document.getElementById('cfgModel').value,
-      http_timeout_seconds:parseInt(document.getElementById('cfgTimeout').value)||300,
       story:{
         type:document.getElementById('cfgStoryType').value,
         title:document.getElementById('cfgStoryTitle').value,
@@ -485,7 +504,7 @@ const App={
     };
     try{
       await this.api('PUT','/api/config',cfg);
-      this.toast('配置已保存','success');
+      this.toast('故事配置已保存','success');
       this.config=cfg;
     }catch(e){this.toast(e.message,'error')}
   },
@@ -730,7 +749,8 @@ const App={
   }
 };
 
-function saveConfig(){App.saveConfig()}
+function saveAPIConfig(){App.saveAPIConfig()}
+function saveStoryConfig(){App.saveStoryConfig()}
 function generateOutline(){App.generateOutline()}
 function generateContinuationOutline(){App.generateContinuationOutline()}
 function importContent(){App.importContent()}

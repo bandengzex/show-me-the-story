@@ -6,13 +6,16 @@ import (
 	"os"
 )
 
+type APIConfig struct {
+	APIKey             string `json:"api_key"`
+	BaseURL            string `json:"base_url"`
+	Model              string `json:"model"`
+	HTTPTimeoutSeconds int    `json:"http_timeout_seconds"`
+}
+
 type Config struct {
-	APIKey            string          `json:"api_key"`
-	BaseURL           string          `json:"base_url"`
-	Model             string          `json:"model"`
-	HTTPTimeoutSeconds int           `json:"http_timeout_seconds"`
-	Story             StoryConfig     `json:"story"`
-	Prompts           PromptsConfig   `json:"prompts"`
+	Story   StoryConfig   `json:"story"`
+	Prompts PromptsConfig `json:"prompts"`
 }
 
 type StoryConfig struct {
@@ -27,20 +30,25 @@ type StoryConfig struct {
 }
 
 type PromptsConfig struct {
-	OutlineGeneration  string `json:"outline_generation"`
-	ChapterWriting     string `json:"chapter_writing"`
-	ChapterSummary     string `json:"chapter_summary"`
-	FactCheck          string `json:"fact_check"`
-	OutlineRevision    string `json:"outline_revision"`
-	ForeshadowPlanning string `json:"foreshadow_planning"`
+	OutlineGeneration             string `json:"outline_generation"`
+	ChapterWriting                string `json:"chapter_writing"`
+	ChapterSummary                string `json:"chapter_summary"`
+	FactCheck                     string `json:"fact_check"`
+	OutlineRevision               string `json:"outline_revision"`
+	ForeshadowPlanning            string `json:"foreshadow_planning"`
 	ForeshadowUpdate              string `json:"foreshadow_update"`
 	ContentAnalysis               string `json:"content_analysis"`
 	ContinuationOutlineGeneration string `json:"continuation_outline_generation"`
 }
 
+func DefaultAPIConfig() *APIConfig {
+	return &APIConfig{
+		HTTPTimeoutSeconds: 300,
+	}
+}
+
 func DefaultConfig() *Config {
 	cfg := &Config{
-		HTTPTimeoutSeconds: 300,
 		Story: StoryConfig{
 			ChapterCount:          30,
 			TargetWordsPerChapter: 2500,
@@ -48,6 +56,39 @@ func DefaultConfig() *Config {
 	}
 	cfg.Prompts.applyDefaults()
 	return cfg
+}
+
+func LoadAPIConfig(path string) (*APIConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			cfg := DefaultAPIConfig()
+			if saveErr := saveAPIConfig(path, cfg); saveErr != nil {
+				return nil, fmt.Errorf("创建默认API配置文件失败: %w", saveErr)
+			}
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("读取API配置文件失败: %w", err)
+	}
+
+	var cfg APIConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
+	}
+
+	if cfg.HTTPTimeoutSeconds <= 0 {
+		cfg.HTTPTimeoutSeconds = 300
+	}
+
+	return &cfg, nil
+}
+
+func saveAPIConfig(path string, cfg *APIConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, data)
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -73,9 +114,6 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Story.TargetWordsPerChapter <= 0 {
 		cfg.Story.TargetWordsPerChapter = 2500
-	}
-	if cfg.HTTPTimeoutSeconds <= 0 {
-		cfg.HTTPTimeoutSeconds = 300
 	}
 
 	cfg.Prompts.applyDefaults()
