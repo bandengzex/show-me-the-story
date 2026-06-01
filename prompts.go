@@ -190,13 +190,12 @@ var DefaultPrompts = PromptsConfig{
 只返回有变化的伏笔。如果某条伏笔在本章完全没有被提及，不要包含在返回结果中。
 请严格以JSON格式输出，不要添加任何额外文字。`,
 
-	ContentAnalysis: `你是一位专业的小说分析编辑。请分析以下已有小说文本，提取故事元数据、为每章生成摘要，并建议后续章节大纲。
-
-【用户指定续写章节数】{{.ContinuationCount}}
+	ContentAnalysis: `你是一位专业的小说分析编辑。请分析以下已有小说文本，提取故事元数据、为每章生成大纲和摘要。
 
 请以JSON格式返回，结构如下：
 {
   "title": "小说标题",
+  "story_type": "故事类型（如：奇幻/都市/科幻/悬疑等）",
   "core_prompt": "核心写作提示词（用于指导后续各章创作的系统级提示）",
   "core_requirements": "核心写作要求",
   "writing_style": "写作风格描述",
@@ -206,27 +205,49 @@ var DefaultPrompts = PromptsConfig{
     {
       "num": 1,
       "title": "章节标题",
-      "summary": "200字以内的章节摘要"
-    }
-  ],
-  "continuation_chapters": [
-    {
-      "num": 6,
-      "title": "建议标题",
-      "outline": "本章大纲建议"
+      "outline": "本章内容概要（描述本章发生了什么，100-200字）",
+      "summary": "结构化摘要（用于后续创作的前情提要，200字以内，包含核心事件、心理轨迹、状态变化、关键细节）"
     }
   ]
 }
 
 分析要求：
 1. 从文本中识别章节边界（支持"第X章"、"# Chapter X"、空行分隔等常见格式）
-2. 为每章生成200字以内的摘要，保留可延续的状态信息（心理轨迹、关键细节、情绪色调）
-3. 提取故事元数据：写作风格、角色设定、世界观设定
-4. 生成 core_prompt 和 core_requirements，用于指导后续创作
-5. 根据已有内容推断后续 {{.ContinuationCount}} 章的大纲建议
+2. 为每章生成：outline（本章内容概要）和 summary（用于后续创作的结构化摘要）
+3. summary 需保留可延续的状态信息：核心事件、心理轨迹、关键细节、情绪色调
+4. 提取故事元数据：故事类型、写作风格、角色设定、世界观设定
+5. 生成 core_prompt 和 core_requirements，用于指导后续创作
 
 【已有小说文本】
 {{.ExistingContent}}
 
 请严格以JSON格式输出，不要添加任何额外文字。`,
+
+	ContinuationOutlineGeneration: `你是一位专业的小说策划编辑。请根据已有章节的大纲和摘要，为后续章节生成大纲。
+
+【小说标题】{{.Title}}
+【故事类型】{{.StoryType}}
+【核心写作提示词】{{.CorePrompt}}
+【核心写作要求】{{.CoreRequirements}}
+【写作风格】{{.WritingStyle}}
+【角色设定】{{.CharacterSetting}}
+【世界观】{{.WorldSetting}}
+
+【已有章节】
+{{.ExistingOutline}}
+
+请为后续 {{.NewChapterCount}} 章生成大纲，从第 {{.StartNum}} 章开始。
+
+请以JSON格式返回：
+{
+  "chapters": [
+    {"num": {{.StartNum}}, "title": "章节标题", "outline": "本章大纲"},
+    ...
+  ]
+}
+
+注意：
+1. 大纲需要承接已有章节的故事线，保持连贯性
+2. 每章大纲应包含具体的情节发展，而非笼统的描述
+3. 请严格以JSON格式输出，不要添加任何额外文字`,
 }

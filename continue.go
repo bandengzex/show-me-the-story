@@ -3,31 +3,32 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 type ContinueAnalysis struct {
-	Title                string            `json:"title"`
-	CorePrompt           string            `json:"core_prompt"`
-	CoreRequirements     string            `json:"core_requirements"`
-	WritingStyle         string            `json:"writing_style"`
-	CharacterSetting     string            `json:"character_setting"`
-	WorldSetting         string            `json:"world_setting"`
-	Chapters             []ContinueChapter `json:"chapters"`
-	ContinuationChapters []ContinueChapter `json:"continuation_chapters"`
+	Title            string            `json:"title"`
+	StoryType        string            `json:"story_type"`
+	CorePrompt       string            `json:"core_prompt"`
+	CoreRequirements string            `json:"core_requirements"`
+	WritingStyle     string            `json:"writing_style"`
+	CharacterSetting string            `json:"character_setting"`
+	WorldSetting     string            `json:"world_setting"`
+	Chapters         []ContinueChapter `json:"chapters"`
 }
 
 type ContinueChapter struct {
 	Num     int    `json:"num"`
 	Title   string `json:"title"`
-	Summary string `json:"summary,omitempty"`
 	Outline string `json:"outline,omitempty"`
+	Summary string `json:"summary,omitempty"`
 	Content string `json:"content,omitempty"`
 }
 
-func AnalyzeExistingContent(cfg *Config, content string, continuationCount int) (*ContinueAnalysis, error) {
+func AnalyzeExistingContent(cfg *Config, content string) (*ContinueAnalysis, error) {
 	userPrompt := RenderPrompt(cfg.Prompts.ContentAnalysis, map[string]string{
-		"ExistingContent":    content,
-		"ContinuationCount": fmt.Sprintf("%d", continuationCount),
+		"ExistingContent": content,
 	})
 
 	systemPrompt := "你是一位专业的小说分析编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
@@ -43,39 +44,66 @@ func AnalyzeExistingContent(cfg *Config, content string, continuationCount int) 
 	return &resp, nil
 }
 
-func ImportContinueAction(cfg *Config, state *Progress, analysis *ContinueAnalysis, progressPath string, cfgPath string) error {
+func splitContentByChapters(content string, chapters []ContinueChapter) []string {
+	if len(chapters) == 0 {
+		return nil
+	}
+
+	re := regexp.MustCompile(`(?m)^[\s]*(第[一二三四五六七八九十百千\d]+章|Chapter\s+\d+|#\s+Chapter\s+\d+|第\d+章)`)
+	matches := re.FindAllStringIndex(content, -1)
+
+	if len(matches) == 0 {
+		return []string{content}
+	}
+
+	segments := make([]string, 0, len(matches))
+	for i, match := range matches {
+		start := match[0]
+		end := len(content)
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
+		seg := strings.TrimSpace(content[start:end])
+		if seg != "" {
+			segments = append(segments, seg)
+		}
+	}
+
+	if len(segments) == 0 {
+		return []string{content}
+	}
+
+	return segments
+}
+
+func ImportContinueAction(cfg *Config, state *Progress, analysis *ContinueAnalysis, content string, progressPath string, cfgPath string) error {
 	state.Title = analysis.Title
 	state.CorePrompt = analysis.CorePrompt
 	state.CoreRequirements = analysis.CoreRequirements
 
-	state.Chapters = make([]ChapterState, 0, len(analysis.Chapters)+len(analysis.ContinuationChapters))
+	segments := splitContentByChapters(content, analysis.Chapters)
 
+	state.Chapters = make([]ChapterState, 0, len(analysis.Chapters))
 	for i, ch := range analysis.Chapters {
+		chapterContent := ""
+		if i < len(segments) {
+			chapterContent = segments[i]
+		}
 		state.Chapters = append(state.Chapters, ChapterState{
 			Num:     i + 1,
 			Title:   ch.Title,
-			Outline: "",
-			Content: ch.Content,
+			Outline: ch.Outline,
+			Content: chapterContent,
 			Summary: ch.Summary,
 			Status:  StatusAccepted,
 		})
 	}
 
-	offset := len(analysis.Chapters)
-	for i, ch := range analysis.ContinuationChapters {
-		state.Chapters = append(state.Chapters, ChapterState{
-			Num:     offset + i + 1,
-			Title:   ch.Title,
-			Outline: ch.Outline,
-			Status:  StatusPending,
-		})
-	}
-
 	state.CurrentChapterIndex = len(analysis.Chapters)
-	state.Phase = "writing"
+	state.Phase = "outline"
 
 	snapshot := StoryConfig{
-		Type:                  cfg.Story.Type,
+		Type:                  analysis.StoryType,
 		Title:                 analysis.Title,
 		ChapterCount:          len(state.Chapters),
 		TargetWordsPerChapter: cfg.Story.TargetWordsPerChapter,
@@ -86,35 +114,95 @@ func ImportContinueAction(cfg *Config, state *Progress, analysis *ContinueAnalys
 	}
 	state.StoryConfigSnapshot = &snapshot
 
-	oldWritingStyle := cfg.Story.WritingStyle
-	oldCharacterSetting := cfg.Story.CharacterSetting
-	oldWorldSetting := cfg.Story.WorldSetting
-	oldCoreRequirements := cfg.Story.CoreRequirements
-	oldTitle := cfg.Story.Title
+	oldStory := cfg.Story
 
+	cfg.Story.Type = analysis.StoryType
+	cfg.Story.Title = analysis.Title
 	cfg.Story.WritingStyle = analysis.WritingStyle
 	cfg.Story.CharacterSetting = analysis.CharacterSetting
 	cfg.Story.WorldSetting = analysis.WorldSetting
 	cfg.Story.CoreRequirements = analysis.CoreRequirements
-	cfg.Story.Title = analysis.Title
 
 	if err := SaveProgress(progressPath, state); err != nil {
-		cfg.Story.WritingStyle = oldWritingStyle
-		cfg.Story.CharacterSetting = oldCharacterSetting
-		cfg.Story.WorldSetting = oldWorldSetting
-		cfg.Story.CoreRequirements = oldCoreRequirements
-		cfg.Story.Title = oldTitle
+		cfg.Story = oldStory
 		return fmt.Errorf("保存进度失败: %w", err)
 	}
 
 	if err := saveConfig(cfgPath, cfg); err != nil {
-		cfg.Story.WritingStyle = oldWritingStyle
-		cfg.Story.CharacterSetting = oldCharacterSetting
-		cfg.Story.WorldSetting = oldWorldSetting
-		cfg.Story.CoreRequirements = oldCoreRequirements
-		cfg.Story.Title = oldTitle
+		cfg.Story = oldStory
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
 
+	return nil
+}
+
+func GenerateContinuationOutline(cfg *Config, state *Progress, newChapterCount int, progressPath string, logger *LogBroadcaster) error {
+	logger.StepInfo(1, 2, "正在构建已有章节上下文...")
+
+	existingOutline := ""
+	for _, ch := range state.Chapters {
+		status := ""
+		if ch.Status == StatusAccepted {
+			status = "✅"
+		}
+		existingOutline += fmt.Sprintf("第%d章《%s》%s: %s\n", ch.Num, ch.Title, status, ch.Outline)
+	}
+
+	snapshot := state.StoryConfigSnapshot
+	if snapshot == nil {
+		snapshot = &cfg.Story
+	}
+
+	startNum := len(state.Chapters) + 1
+
+	userPrompt := RenderPrompt(cfg.Prompts.ContinuationOutlineGeneration, map[string]string{
+		"Title":            state.Title,
+		"StoryType":        snapshot.Type,
+		"CorePrompt":       state.CorePrompt,
+		"CoreRequirements": state.CoreRequirements,
+		"WritingStyle":     snapshot.WritingStyle,
+		"CharacterSetting": snapshot.CharacterSetting,
+		"WorldSetting":     snapshot.WorldSetting,
+		"ExistingOutline":  existingOutline,
+		"NewChapterCount":  fmt.Sprintf("%d", newChapterCount),
+		"StartNum":         fmt.Sprintf("%d", startNum),
+	})
+
+	systemPrompt := "你是一位专业的小说策划编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
+
+	rawResp := CallAPIWithRetryLog(cfg, systemPrompt, userPrompt, logger)
+	rawResp = cleanJSONResponse(rawResp)
+
+	var resp OutlineResponse
+	if err := json.Unmarshal([]byte(rawResp), &resp); err != nil {
+		return fmt.Errorf("解析续写大纲JSON失败: %w", err)
+	}
+
+	logger.StepInfo(2, 2, "正在保存续写大纲...")
+
+	for _, ch := range resp.Chapters {
+		state.Chapters = append(state.Chapters, ChapterState{
+			Num:     ch.Num,
+			Title:   ch.Title,
+			Outline: ch.Outline,
+			Status:  StatusPending,
+		})
+	}
+
+	if resp.Title != "" {
+		state.Title = resp.Title
+	}
+	if resp.CorePrompt != "" {
+		state.CorePrompt = resp.CorePrompt
+	}
+	if resp.CoreRequirements != "" {
+		state.CoreRequirements = resp.CoreRequirements
+	}
+
+	if err := SaveProgress(progressPath, state); err != nil {
+		return fmt.Errorf("保存进度失败: %w", err)
+	}
+
+	logger.Info(fmt.Sprintf("续写大纲生成完成，新增 %d 章，总计 %d 章", len(resp.Chapters), len(state.Chapters)))
 	return nil
 }

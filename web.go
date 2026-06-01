@@ -27,6 +27,7 @@ func startWebServer(cfg *Config, cfgPath string, state *Progress, progressPath s
 	mux.HandleFunc("POST /api/outline/generate", h.PostOutlineGenerate)
 	mux.HandleFunc("POST /api/outline/confirm", h.PostOutlineConfirm)
 	mux.HandleFunc("POST /api/outline/revise", h.PostOutlineRevise)
+	mux.HandleFunc("POST /api/outline/generate-continuation", h.PostOutlineGenerateContinuation)
 
 	mux.HandleFunc("POST /api/chapter/generate", h.PostChapterGenerate)
 	mux.HandleFunc("POST /api/chapter/confirm", h.PostChapterConfirm)

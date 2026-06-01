@@ -130,12 +130,14 @@ func cleanJSONResponse(s string) string {
 }
 
 func GenerateOutlineAction(cfg *Config, state *Progress, progressPath string, logger *LogBroadcaster) error {
-	logger.Info("正在调用 AI 生成大纲...")
+	logger.StepInfo(1, 2, "正在调用 AI 生成大纲...")
 
 	outlineResp, err := generateOutline(cfg)
 	if err != nil {
 		return fmt.Errorf("生成大纲失败: %w", err)
 	}
+
+	logger.StepInfo(2, 2, "正在保存大纲...")
 
 	state.Title = outlineResp.Title
 	state.CorePrompt = outlineResp.CorePrompt
@@ -156,22 +158,24 @@ func GenerateOutlineAction(cfg *Config, state *Progress, progressPath string, lo
 		return fmt.Errorf("保存进度失败: %w", err)
 	}
 
-	logger.Info(fmt.Sprintf("大纲生成完成，共 %d 章，标题: 《%s》", len(state.Chapters), state.Title))
+	logger.Success(fmt.Sprintf("大纲生成完成，共 %d 章，标题: 《%s》", len(state.Chapters), state.Title))
 	return nil
 }
 
 func ReviseOutlineAction(cfg *Config, state *Progress, progressPath, feedback string, logger *LogBroadcaster) error {
-	logger.Info("正在根据意见修订大纲...")
+	logger.StepInfo(1, 2, "正在根据意见修订大纲...")
 
 	if err := reviseOutline(cfg, state, feedback); err != nil {
 		return fmt.Errorf("修订大纲失败: %w", err)
 	}
 
+	logger.StepInfo(2, 2, "正在保存修订后的大纲...")
+
 	if err := SaveProgress(progressPath, state); err != nil {
 		return fmt.Errorf("保存进度失败: %w", err)
 	}
 
-	logger.Info(fmt.Sprintf("大纲已修订，共 %d 章", len(state.Chapters)))
+	logger.Success(fmt.Sprintf("大纲已修订，共 %d 章", len(state.Chapters)))
 	return nil
 }
 

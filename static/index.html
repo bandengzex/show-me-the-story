@@ -197,6 +197,7 @@ main.active{display:block}
 </table>
 <div class="btn-group">
 <button class="btn btn-success" id="btnConfirmOutline" onclick="confirmOutline()">确认大纲</button>
+<button class="btn btn-primary" id="btnGenContinuation" onclick="generateContinuationOutline()" style="display:none">生成后续大纲</button>
 <button class="btn btn-outline" id="btnReviseOutline" onclick="reviseOutline()">修订大纲</button>
 <button class="btn btn-danger" id="btnDeleteOutline" onclick="deleteOutline()">删除大纲</button>
 </div>
@@ -217,10 +218,6 @@ main.active{display:block}
 <textarea id="continueContent" style="min-height:200px" placeholder="将已有小说文本粘贴到这里..."></textarea>
 </div>
 <div class="form-row">
-<div class="form-group">
-<label>续写章节数</label>
-<input id="continueChapterCount" type="number" value="5" min="1" max="50">
-</div>
 <div class="form-group" style="display:flex;align-items:flex-end">
 <button class="btn btn-primary" id="btnAnalyze" onclick="importContent()">分析内容</button>
 </div>
@@ -258,20 +255,10 @@ main.active{display:block}
 </div>
 </div>
 <div class="panel">
-<h2>已有章节摘要</h2>
+<h2>已有章节大纲</h2>
 <table class="outline-table">
-<thead><tr><th>#</th><th>标题</th><th>摘要</th></tr></thead>
+<thead><tr><th>#</th><th>标题</th><th>大纲</th><th>摘要</th></tr></thead>
 <tbody id="caChaptersBody"></tbody>
-</table>
-</div>
-<div class="panel">
-<h2>续写章节大纲</h2>
-<div id="caContinuationEmpty" class="empty-state" style="display:none">
-<p>AI 未返回续写建议，确认后将直接进入写作阶段。</p>
-</div>
-<table class="outline-table" id="caContinuationTable">
-<thead><tr><th>#</th><th>标题</th><th>大纲</th></tr></thead>
-<tbody id="caContinuationBody"></tbody>
 </table>
 </div>
 <div class="btn-group">
@@ -378,6 +365,10 @@ const App={
       const d=JSON.parse(e.data);
       this.appendContentChunk(d.chapter_idx,d.text);
     });
+    this.eventSource.addEventListener('stream_progress',e=>{
+      const d=JSON.parse(e.data);
+      this.appendStreamProgress(d.chapter_idx,d.char_count);
+    });
     this.eventSource.addEventListener('continue_analysis',e=>{
       const d=JSON.parse(e.data);
       this.showContinueResult(d);
@@ -427,6 +418,19 @@ const App={
       contentEl.style.display='block';
       contentEl.textContent=this.streamingContent;
     }
+  },
+  appendStreamProgress(chapterIdx,charCount){
+    const body=document.getElementById('logBody');
+    const lastEntry=body.lastElementChild;
+    if(lastEntry&&lastEntry.dataset.streamProgress){
+      lastEntry.remove();
+    }
+    const div=document.createElement('div');
+    div.className='entry info';
+    div.dataset.streamProgress='1';
+    div.innerHTML=`<span class="time">${new Date().toLocaleTimeString('zh-CN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span><span class="msg">正在生成中... 已写 ${charCount} 字</span>`;
+    body.appendChild(div);
+    body.scrollTop=body.scrollHeight;
   },
   toast(msg,type='info'){
     const t=document.createElement('div');
@@ -531,7 +535,12 @@ const App={
     });
     const inOutline=p.phase==='outline';
     const hasContent=p.chapters.some(c=>c.content);
+    const hasAccepted=p.chapters.some(c=>c.status==='accepted');
+    const hasPending=p.chapters.some(c=>c.status==='pending');
+    const showContBtn=inOutline&&hasAccepted&&!hasPending&&!this.taskRunning;
     document.getElementById('btnConfirmOutline').disabled=!inOutline||this.taskRunning;
+    document.getElementById('btnGenContinuation').style.display=showContBtn?'inline-flex':'none';
+    document.getElementById('btnGenContinuation').disabled=this.taskRunning;
     document.getElementById('btnReviseOutline').disabled=!inOutline||this.taskRunning;
     document.getElementById('btnDeleteOutline').disabled=hasContent||this.taskRunning;
   },
@@ -593,12 +602,17 @@ const App={
       this.toast('大纲生成中...','info');
     }catch(e){this.toast(e.message,'error')}
   },
+  async generateContinuationOutline(){
+    try{
+      await this.api('POST','/api/outline/generate-continuation',{chapter_count:5});
+      this.toast('续写大纲生成中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
   async importContent(){
     const content=document.getElementById('continueContent').value.trim();
     if(!content){this.toast('请粘贴已有内容','error');return}
-    const count=parseInt(document.getElementById('continueChapterCount').value)||5;
     try{
-      await this.api('POST','/api/continue/import',{content,continuation_chapter_count:count});
+      await this.api('POST','/api/continue/import',{content});
       this.toast('内容分析中...','info');
     }catch(e){this.toast(e.message,'error')}
   },
@@ -616,24 +630,9 @@ const App={
     ctbody.innerHTML='';
     (d.chapters||[]).forEach(ch=>{
       const tr=document.createElement('tr');
-      tr.innerHTML=`<td>${ch.num}</td><td>${this.escHtml(ch.title)}</td><td>${this.escHtml(ch.summary||'')}</td>`;
+      tr.innerHTML=`<td>${ch.num}</td><td>${this.escHtml(ch.title)}</td><td>${this.escHtml(ch.outline||'')}</td><td>${this.escHtml(ch.summary||'')}</td>`;
       ctbody.appendChild(tr);
     });
-    const contBody=document.getElementById('caContinuationBody');
-    contBody.innerHTML='';
-    const cont=d.continuation_chapters||[];
-    if(cont.length===0){
-      document.getElementById('caContinuationTable').style.display='none';
-      document.getElementById('caContinuationEmpty').style.display='block';
-    }else{
-      document.getElementById('caContinuationTable').style.display='';
-      document.getElementById('caContinuationEmpty').style.display='none';
-      cont.forEach(ch=>{
-        const tr=document.createElement('tr');
-        tr.innerHTML=`<td>${ch.num}</td><td><input class="ca-cont-title" data-num="${ch.num}" value="${this.escHtml(ch.title||'')}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px"></td><td><input class="ca-cont-outline" data-num="${ch.num}" value="${this.escHtml(ch.outline||'')}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px"></td>`;
-        contBody.appendChild(tr);
-      });
-    }
   },
   async confirmContinue(){
     if(!this.continueAnalysis){this.toast('请先分析内容','error');return}
@@ -644,16 +643,6 @@ const App={
     d.world_setting=document.getElementById('caWorldSetting').value;
     d.core_prompt=document.getElementById('caCorePrompt').value;
     d.core_requirements=document.getElementById('caCoreRequirements').value;
-    document.querySelectorAll('.ca-cont-title').forEach(inp=>{
-      const num=parseInt(inp.dataset.num);
-      const ch=d.continuation_chapters.find(c=>c.num===num);
-      if(ch)ch.title=inp.value;
-    });
-    document.querySelectorAll('.ca-cont-outline').forEach(inp=>{
-      const num=parseInt(inp.dataset.num);
-      const ch=d.continuation_chapters.find(c=>c.num===num);
-      if(ch)ch.outline=inp.value;
-    });
     try{
       await this.api('POST','/api/continue/confirm',d);
       this.toast('续写导入成功','success');
@@ -661,7 +650,7 @@ const App={
       document.getElementById('continueImport').style.display='';
       document.getElementById('continueResult').style.display='none';
       document.getElementById('continueContent').value='';
-      location.hash='#writing';
+      location.hash='#outline';
       await this.loadProgress();
     }catch(e){this.toast(e.message,'error')}
   },
@@ -743,6 +732,7 @@ const App={
 
 function saveConfig(){App.saveConfig()}
 function generateOutline(){App.generateOutline()}
+function generateContinuationOutline(){App.generateContinuationOutline()}
 function importContent(){App.importContent()}
 function confirmContinue(){App.confirmContinue()}
 function resetContinue(){App.resetContinue()}

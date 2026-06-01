@@ -110,6 +110,21 @@ func CallAPIWithRetry(cfg *Config, system, user string) string {
 	}
 }
 
+func CallAPIWithRetryLog(cfg *Config, system, user string, logger *LogBroadcaster) string {
+	retryCount := 0
+	for {
+		result, err := CallAPI(cfg, system, user)
+		if err == nil && result != "" {
+			return result
+		}
+
+		retryCount++
+		waitTime := getWaitTime(retryCount)
+		logger.Warn(fmt.Sprintf("API调用失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
+		time.Sleep(time.Duration(waitTime) * time.Second)
+	}
+}
+
 func getWaitTime(retry int) int {
 	if retry > 6 {
 		return 30
@@ -209,6 +224,21 @@ func CallAPIStreamWithRetry(cfg *Config, system, user string, onChunk func(strin
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		fmt.Printf(" ⚠️ [错误] 流式API调用失败: %v。第 %d 次重试，等待 %ds 后重试...\n", err, retryCount, waitTime)
+		time.Sleep(time.Duration(waitTime) * time.Second)
+	}
+}
+
+func CallAPIStreamWithRetryLog(cfg *Config, system, user string, onChunk func(string), logger *LogBroadcaster) string {
+	retryCount := 0
+	for {
+		result, err := CallAPIStream(cfg, system, user, onChunk)
+		if err == nil && result != "" {
+			return result
+		}
+
+		retryCount++
+		waitTime := getWaitTime(retryCount)
+		logger.Warn(fmt.Sprintf("流式API调用失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
 		time.Sleep(time.Duration(waitTime) * time.Second)
 	}
 }

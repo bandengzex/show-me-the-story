@@ -33,8 +33,9 @@ type PromptsConfig struct {
 	FactCheck          string `json:"fact_check"`
 	OutlineRevision    string `json:"outline_revision"`
 	ForeshadowPlanning string `json:"foreshadow_planning"`
-	ForeshadowUpdate   string `json:"foreshadow_update"`
-	ContentAnalysis    string `json:"content_analysis"`
+	ForeshadowUpdate              string `json:"foreshadow_update"`
+	ContentAnalysis               string `json:"content_analysis"`
+	ContinuationOutlineGeneration string `json:"continuation_outline_generation"`
 }
 
 func DefaultConfig() *Config {
@@ -114,5 +115,8 @@ func (p *PromptsConfig) applyDefaults() {
 	}
 	if p.ContentAnalysis == "" {
 		p.ContentAnalysis = DefaultPrompts.ContentAnalysis
+	}
+	if p.ContinuationOutlineGeneration == "" {
+		p.ContinuationOutlineGeneration = DefaultPrompts.ContinuationOutlineGeneration
 	}
 }

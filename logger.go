@@ -69,10 +69,21 @@ func (lb *LogBroadcaster) Log(level, msg string) {
 	fmt.Printf(" [%s] %s\n", level, msg)
 }
 
-func (lb *LogBroadcaster) Info(msg string)   { lb.Log("info", msg) }
-func (lb *LogBroadcaster) Error(msg string)  { lb.Log("error", msg) }
-func (lb *LogBroadcaster) Warn(msg string)   { lb.Log("warn", msg) }
+func (lb *LogBroadcaster) Info(msg string)    { lb.Log("info", msg) }
+func (lb *LogBroadcaster) Error(msg string)   { lb.Log("error", msg) }
+func (lb *LogBroadcaster) Warn(msg string)    { lb.Log("warn", msg) }
 func (lb *LogBroadcaster) Success(msg string) { lb.Log("success", msg) }
+
+func (lb *LogBroadcaster) StepInfo(step, total int, msg string) {
+	lb.Log("info", fmt.Sprintf("[%d/%d] %s", step, total, msg))
+}
+
+func (lb *LogBroadcaster) StreamProgress(chapterIdx int, charCount int) {
+	lb.Emit("stream_progress", map[string]interface{}{
+		"chapter_idx": chapterIdx,
+		"char_count":  charCount,
+	})
+}
 
 func (lb *LogBroadcaster) Emit(event string, data interface{}) {
 	lb.broadcast(SSEMessage{Event: event, Data: data})

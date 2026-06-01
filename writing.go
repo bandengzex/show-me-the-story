@@ -28,21 +28,23 @@ func GenerateChapterAction(cfg *Config, state *Progress, progressPath string, lo
 		return err
 	}
 
-	logger.Info(fmt.Sprintf("正在创作第 %d 章: 《%s》", ch.Num, ch.Title))
+	logger.Info(fmt.Sprintf("开始创作第 %d 章: 《%s》", ch.Num, ch.Title))
 
 	maxFactCheckRetries := 3
 	for attempt := 0; attempt <= maxFactCheckRetries; attempt++ {
-		logger.Info("正在构思并撰写正文...")
-		content := generateChapterContentStreamWithRetry(cfg, state, i, logger)
+		logger.StepInfo(1, 4, "正在构思并撰写正文...")
+		content := generateChapterContentStreamWithRetryLog(cfg, state, i, logger)
 		ch.Content = content
+		logger.Info(fmt.Sprintf("正文撰写完毕，共 %d 字", len([]rune(content))))
 
-		logger.Info("正文撰写完毕，正在提炼本章摘要...")
-		summary := generateChapterSummaryWithRetry(cfg, content)
+		logger.StepInfo(2, 4, "正在提炼本章摘要...")
+		summary := generateChapterSummaryWithRetryLog(cfg, content, logger)
 		ch.Summary = summary
+		logger.Info("摘要提炼完成")
 
-		logger.Info("正在对本章进行事实核查...")
+		logger.StepInfo(3, 4, "正在对本章进行事实核查...")
 		historySummary := buildHistorySummary(state, i)
-		factCheckResult := generateChapterFactCheckWithRetry(cfg, content, historySummary)
+		factCheckResult := generateChapterFactCheckWithRetryLog(cfg, content, historySummary, logger)
 
 		if strings.Contains(factCheckResult, "FAIL") {
 			if attempt < maxFactCheckRetries {
@@ -58,8 +60,8 @@ func GenerateChapterAction(cfg *Config, state *Progress, progressPath string, lo
 	}
 
 	if len(state.Foreshadows) > 0 {
-		logger.Info("正在更新伏笔状态...")
-		if err := UpdateForeshadows(cfg, state, i); err != nil {
+		logger.StepInfo(4, 4, "正在更新伏笔状态...")
+		if err := UpdateForeshadows(cfg, state, i, logger); err != nil {
 			logger.Warn(fmt.Sprintf("伏笔状态更新失败: %v（不影响本章）", err))
 		} else {
 			active := 0
@@ -109,21 +111,26 @@ func ReviseChapterAction(cfg *Config, state *Progress, progressPath, feedback st
 
 	logger.Info(fmt.Sprintf("正在修改第 %d 章《%s》...", ch.Num, ch.Title))
 
+	logger.StepInfo(1, 3, "正在根据意见重写正文...")
 	revisedContent, err := reviseChapterContentStream(cfg, state, chapterIdx, feedback, logger)
 	if err != nil {
 		return fmt.Errorf("修改章节失败: %w", err)
 	}
 	ch.Content = revisedContent
+	logger.Info(fmt.Sprintf("正文修改完毕，共 %d 字", len([]rune(revisedContent))))
 
-	logger.Info("重新提炼摘要...")
-	ch.Summary = generateChapterSummaryWithRetry(cfg, ch.Content)
+	logger.StepInfo(2, 3, "重新提炼摘要...")
+	ch.Summary = generateChapterSummaryWithRetryLog(cfg, ch.Content, logger)
+	logger.Info("摘要提炼完成")
 
 	SaveChapterMarkdown(*ch, state.Title)
 
 	if chapterIdx+1 < len(state.Chapters) {
-		logger.Info("正在修订后续章节大纲...")
+		logger.StepInfo(3, 3, "正在修订后续章节大纲...")
 		if err := reviseSubsequentOutlines(cfg, state, chapterIdx, feedback); err != nil {
 			logger.Warn(fmt.Sprintf("后续大纲修订失败: %v（不影响当前章节）", err))
+		} else {
+			logger.Info("后续大纲修订完成")
 		}
 	}
 
@@ -223,8 +230,15 @@ func generateChapterContentStream(cfg *Config, state *Progress, idx int, logger 
 		systemPrompt = "你是一位小说作者。"
 	}
 
+	totalChars := 0
+	nextReport := 500
 	onChunk := func(chunk string) {
 		logger.ContentChunk(idx, chunk)
+		totalChars += len([]rune(chunk))
+		if totalChars >= nextReport {
+			logger.StreamProgress(idx, totalChars)
+			nextReport += 500
+		}
 	}
 
 	return CallAPIStream(cfg, systemPrompt, userPrompt, onChunk)
@@ -260,6 +274,21 @@ func generateChapterContentStreamWithRetry(cfg *Config, state *Progress, idx int
 	}
 }
 
+func generateChapterContentStreamWithRetryLog(cfg *Config, state *Progress, idx int, logger *LogBroadcaster) string {
+	retryCount := 0
+	for {
+		content, err := generateChapterContentStream(cfg, state, idx, logger)
+		if err == nil && content != "" {
+			return content
+		}
+
+		retryCount++
+		waitTime := getWaitTime(retryCount)
+		logger.Warn(fmt.Sprintf("正文生成失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
+		time.Sleep(time.Duration(waitTime) * time.Second)
+	}
+}
+
 func generateChapterSummary(cfg *Config, content string) (string, error) {
 	userPrompt := RenderPrompt(cfg.Prompts.ChapterSummary, map[string]string{
 		"ChapterContent": content,
@@ -280,6 +309,21 @@ func generateChapterSummaryWithRetry(cfg *Config, content string) string {
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		fmt.Printf(" ⚠️ [错误] 摘要提炼失败: %v。第 %d 次重试，等待 %ds 后重试...\n", err, retryCount, waitTime)
+		time.Sleep(time.Duration(waitTime) * time.Second)
+	}
+}
+
+func generateChapterSummaryWithRetryLog(cfg *Config, content string, logger *LogBroadcaster) string {
+	retryCount := 0
+	for {
+		summary, err := generateChapterSummary(cfg, content)
+		if err == nil && summary != "" {
+			return summary
+		}
+
+		retryCount++
+		waitTime := getWaitTime(retryCount)
+		logger.Warn(fmt.Sprintf("摘要提炼失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
 		time.Sleep(time.Duration(waitTime) * time.Second)
 	}
 }
@@ -306,6 +350,21 @@ func generateChapterFactCheckWithRetry(cfg *Config, content string, historySumma
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		fmt.Printf(" ⚠️ [错误] 事实核查失败: %v。第 %d 次重试，等待 %ds 后重试...\n", err, retryCount, waitTime)
+		time.Sleep(time.Duration(waitTime) * time.Second)
+	}
+}
+
+func generateChapterFactCheckWithRetryLog(cfg *Config, content string, historySummary string, logger *LogBroadcaster) string {
+	retryCount := 0
+	for {
+		result, err := generateChapterFactCheck(cfg, content, historySummary)
+		if err == nil && result != "" {
+			return result
+		}
+
+		retryCount++
+		waitTime := getWaitTime(retryCount)
+		logger.Warn(fmt.Sprintf("事实核查失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
 		time.Sleep(time.Duration(waitTime) * time.Second)
 	}
 }
@@ -359,8 +418,15 @@ func reviseChapterContentStream(cfg *Config, state *Progress, chapterIdx int, us
 		state.CorePrompt, state.CoreRequirements,
 		historySummary, ch.Outline, userFeedback)
 
+	totalChars := 0
+	nextReport := 500
 	onChunk := func(chunk string) {
 		logger.ContentChunk(chapterIdx, chunk)
+		totalChars += len([]rune(chunk))
+		if totalChars >= nextReport {
+			logger.StreamProgress(chapterIdx, totalChars)
+			nextReport += 500
+		}
 	}
 
 	return CallAPIStream(cfg, systemPrompt, userPrompt, onChunk)

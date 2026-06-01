@@ -28,7 +28,7 @@ type ForeshadowUpdateResponse struct {
 	Updates []ForeshadowUpdateItem `json:"updates"`
 }
 
-func SuggestForeshadows(cfg *Config, state *Progress) ([]ForeshadowSuggestion, error) {
+func SuggestForeshadows(cfg *Config, state *Progress, logger *LogBroadcaster) ([]ForeshadowSuggestion, error) {
 	snapshot := state.StoryConfigSnapshot
 	if snapshot == nil {
 		snapshot = &cfg.Story
@@ -50,18 +50,19 @@ func SuggestForeshadows(cfg *Config, state *Progress) ([]ForeshadowSuggestion, e
 
 	systemPrompt := "你是一位资深的小说叙事架构师。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetry(cfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetryLog(cfg, systemPrompt, userPrompt, logger)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ForeshadowPlanResponse
 	if err := json.Unmarshal([]byte(rawResp), &resp); err != nil {
-		return nil, fmt.Errorf("解析伏笔建议JSON失败: %w\n原始响应: %s", err, rawResp)
+		return nil, fmt.Errorf("解析伏笔建议JSON失败: %w", err)
 	}
 
+	logger.Info(fmt.Sprintf("伏笔方案解析完成，共 %d 条", len(resp.Foreshadows)))
 	return resp.Foreshadows, nil
 }
 
-func UpdateForeshadows(cfg *Config, state *Progress, chapterIdx int) error {
+func UpdateForeshadows(cfg *Config, state *Progress, chapterIdx int, logger *LogBroadcaster) error {
 	ch := state.Chapters[chapterIdx]
 
 	foreshadowsText := formatForeshadowsForPrompt(state.Foreshadows)
@@ -89,15 +90,16 @@ func UpdateForeshadows(cfg *Config, state *Progress, chapterIdx int) error {
 
 	systemPrompt := "你是一位严谨的小说伏笔追踪员。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetry(cfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetryLog(cfg, systemPrompt, userPrompt, logger)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ForeshadowUpdateResponse
 	if err := json.Unmarshal([]byte(rawResp), &resp); err != nil {
-		return fmt.Errorf("解析伏笔更新JSON失败: %w\n原始响应: %s", err, rawResp)
+		return fmt.Errorf("解析伏笔更新JSON失败: %w", err)
 	}
 
 	applyForeshadowUpdates(state, resp.Updates, ch.Num)
+	logger.Info(fmt.Sprintf("伏笔状态更新完成，处理 %d 条变更", len(resp.Updates)))
 	return nil
 }
 
