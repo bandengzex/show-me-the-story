@@ -5,13 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
 type Handlers struct {
-	apiCfg       *APIConfig
-	apiCfgPath   string
+	apiCfg     *APIConfig
+	apiCfgPath string
+	logger     *LogBroadcaster
+
+	// Project management
+	progDir     string
+	projectName string
+	projectMu   sync.RWMutex
+
+	// Per-project state (updated on switchProject)
 	cfg          *Config
 	cfgPath      string
 	state        *Progress
@@ -20,34 +30,94 @@ type Handlers struct {
 	settingsPath string
 	skills       []Skill
 	sessionsDir  string
-	logger       *LogBroadcaster
-	taskMu       sync.Mutex
-	taskRunning  bool
-	activeWork   int // 主任务 + 子任务计数
-	taskCtx      context.Context
-	taskCancel   context.CancelFunc
-	projectDir   string
+
+	// Task management
+	taskMu      sync.Mutex
+	taskRunning bool
+	activeWork  int
+	taskCtx     context.Context
+	taskCancel  context.CancelFunc
 
 	pendingContinueContent string
 	lastChatMessage        string      // 缓存最后发送的聊天消息，用于重试
 	lastReconcileBody      StoryConfig // 缓存最后的设定协调请求
 }
 
-func NewHandlers(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath string, state *Progress, progressPath string, settings *ProjectSettings, settingsPath string, skills []Skill, sessionsDir string, logger *LogBroadcaster, projectDir string) *Handlers {
+func NewHandlers(apiCfg *APIConfig, apiCfgPath string, logger *LogBroadcaster, progDir string) *Handlers {
 	return &Handlers{
-		apiCfg:       apiCfg,
-		apiCfgPath:   apiCfgPath,
-		cfg:          cfg,
-		cfgPath:      cfgPath,
-		state:        state,
-		progressPath: progressPath,
-		settings:     settings,
-		settingsPath: settingsPath,
-		skills:       skills,
-		sessionsDir:  sessionsDir,
-		logger:       logger,
-		projectDir:   projectDir,
+		apiCfg:     apiCfg,
+		apiCfgPath: apiCfgPath,
+		logger:     logger,
+		progDir:    progDir,
+		cfg:        DefaultConfig(),
+		state:      &Progress{Phase: "outline"},
+		settings:   &ProjectSettings{},
 	}
+}
+
+func (h *Handlers) storysDir() string {
+	return filepath.Join(h.progDir, "storys")
+}
+
+// switchProject loads all project-specific data for the given project name.
+func (h *Handlers) switchProject(name string) error {
+	h.projectMu.Lock()
+	defer h.projectMu.Unlock()
+
+	projectDir := filepath.Join(h.progDir, "storys", name)
+	if info, err := os.Stat(projectDir); err != nil || !info.IsDir() {
+		return fmt.Errorf("项目目录不存在: %s", name)
+	}
+
+	configPath := filepath.Join(projectDir, "config.json")
+	progressPath := filepath.Join(projectDir, "progress.json")
+	settingsPath := filepath.Join(projectDir, "settings.json")
+	sessionsDir := filepath.Join(projectDir, "sessions")
+	os.MkdirAll(sessionsDir, 0755)
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("加载项目配置失败: %w", err)
+	}
+
+	state, err := LoadProgress(progressPath)
+	if err != nil {
+		return fmt.Errorf("加载项目进度失败: %w", err)
+	}
+	if state == nil {
+		state = &Progress{Phase: "outline"}
+	}
+
+	settings, err := LoadProjectSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("加载项目设定失败: %w", err)
+	}
+
+	skills := LoadAllSkills(cfg, projectDir)
+
+	h.projectName = name
+	h.cfg = cfg
+	h.cfgPath = configPath
+	h.state = state
+	h.progressPath = progressPath
+	h.settings = settings
+	h.settingsPath = settingsPath
+	h.skills = skills
+	h.sessionsDir = sessionsDir
+
+	fmt.Printf(" [系统] 已切换到项目: %s (%s)\n", name, projectDir)
+	return nil
+}
+
+// ensureProject returns true if a project is selected, otherwise writes an error response.
+func (h *Handlers) ensureProject(w http.ResponseWriter) bool {
+	h.projectMu.RLock()
+	defer h.projectMu.RUnlock()
+	if h.projectName == "" {
+		h.writeError(w, http.StatusBadRequest, "请先选择一个项目")
+		return false
+	}
+	return true
 }
 
 func (h *Handlers) writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -1570,7 +1640,7 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 			ProgressPath: h.progressPath,
 			CfgPath:      h.cfgPath,
 			SessionsDir:  h.sessionsDir,
-			ProjectDir:   h.projectDir,
+			ProjectDir:   filepath.Join(h.progDir, "storys", h.projectName),
 			StartAsync: func(taskName string, fn func(goCtx context.Context)) {
 				go func() {
 					h.logger.TaskStart(taskName)

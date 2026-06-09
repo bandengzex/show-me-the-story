@@ -7,6 +7,9 @@ export const settings = writable(null);
 export const skills = writable([]);
 export const taskRunning = writable(false);
 
+export const currentProject = writable(null);
+export const projects = writable([]);
+
 export const currentPage = writable('config');
 export const contextPage = writable('config');
 export const selectedChapter = writable(-1);

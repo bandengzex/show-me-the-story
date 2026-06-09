@@ -10,6 +10,7 @@
 - **模块名**：`showmethestory`
 - **默认端口**：`:48090`（可通过 `PORT` 环境变量覆盖）
 - **前端**：Vite 5 + Svelte 4 + Tailwind CSS 4 + DaisyUI 5（xianii 暗色主题）
+- **项目目录**：`storys/`（程序同目录下，每个故事项目一个子目录）
 
 ## 编译与运行
 
@@ -63,7 +64,7 @@ task dev                              # 编译并启动 Go 后端
 
 | 文件 | 职责 |
 |------|------|
-| `main.go` | 入口，接受命令行项目目录参数，加载API配置/故事配置/进度/设定/技能，创建 sessions 目录，启动 Web 服务器 |
+| `main.go` | 入口，确定程序目录（`progDir`），创建 `storys/` 目录，加载 API 配置，启动 Web 服务器（无项目选择状态） |
 | `config.go` | `APIConfig`、`Config`（含 `SkillConfig`）、`StoryConfig`、`PromptsConfig` 结构体，Load/Save 函数，`applyDefaults` |
 | `state.go` | `Progress`、`ChapterState`、`Foreshadow` 结构体，`LoadProgress`、`SaveProgress`、`SaveChapterMarkdown` |
 | `api.go` | `CallAPI`（同步）、`CallAPIStream`（流式）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog`，`validateAPIConfig`、`isFatalAPIError` |
@@ -76,8 +77,8 @@ task dev                              # 编译并启动 Go 后端
 | `skills.go` | `Skill`、`SkillConfig` 结构体，`LoadBuiltinSkills`、`LoadProjectSkills`、`MergeSkills`、`GetEnabledSkills`、`GetEnabledSkillsByCategory`、`FormatSkillsContent`，`//go:embed embeds/skills` |
 | `agent.go` | `Tool`、`AgentContext`、`AgentStep`、`ToolCall` 结构体，`RunAgentLoop`、工具调用解析、内置工具集（读/写角色/世界观/章节等） |
 | `chat.go` | `ChatSession`、`ChatMessage`、`ChatSessionIndex` 结构体，`LoadChatSessions`、`LoadChatSession`、`SaveChatSession`、`DeleteChatSession` |
-| `handlers.go` | 所有 HTTP handler（含设定 CRUD、技能 toggle、聊天、去AI味）、`PostTaskStop`、`tryStartTask`/`endTask` 互斥（含 task context/cancel）、`writeJSON`/`writeError`、`writeFileAtomic` |
-| `web.go` | 路由注册、CORS/日志中间件、静态文件服务、`startWebServer` |
+| `handlers.go` | `Handlers` 结构体（含项目管理字段 `progDir`/`projectName`/`projectMu`）、项目切换 `switchProject()`、`ensureProject()` 检查、所有 HTTP handler、`tryStartTask`/`endTask` 互斥、项目管理 handler（`GetProjects`/`PostProject`/`PostProjectSelect`/`GetProjectCurrent`/`DeleteProject`） |
+| `web.go` | 路由注册（含项目管理端点）、CORS/日志中间件、静态文件服务、`startWebServer` |
 | `logger.go` | `LogBroadcaster`（SSE 广播）、所有日志/事件方法（含 `ChatChunk`、`ToolCallStart`、`ToolCallEnd`、`PolishResult`） |
 | `prompts.go` | `RenderPrompt`（`{{.KeyName}}` 替换）、`DefaultPrompts` 变量（所有内置提示词模板） |
 | `filesys.go` | `writeFileImpl`、`deleteFileImpl`、`renameFileImpl` |
@@ -112,7 +113,9 @@ task dev                              # 编译并启动 Go 后端
 
 ### 项目目录化
 
-`main.go` 接受命令行参数 `os.Args[1]` 作为项目目录，默认为当前目录。所有文件路径（`progress.json`、`config.json`、`settings.json`、`sessions/`）都相对于项目目录。`api.json` 优先查找项目目录，fallback 到程序同目录。
+`main.go` 接受命令行参数 `os.Args[1]` 作为程序基础目录（`progDir`），默认为当前目录。在 `progDir` 下自动创建 `storys/` 目录，每个故事项目是 `storys/{projectName}/` 子目录。`api.json` 始终在 `progDir` 下（全局共享）。所有项目文件（`progress.json`、`config.json`、`settings.json`、`sessions/`）都在各自项目目录中。
+
+启动时不绑定具体项目，前端显示项目选择页面。用户选择/创建项目后，后端通过 `switchProject()` 加载对应项目的全部数据。
 
 ### 前端构建
 
@@ -261,6 +264,11 @@ planted → progressing → resolved
 
 | 方法 | 路径 | 同步/异步 | 说明 |
 |------|------|----------|------|
+| GET | `/api/projects` | 同步 | 列出所有项目 |
+| POST | `/api/projects` | 同步 | 创建新项目 |
+| GET | `/api/projects/current` | 同步 | 获取当前项目名 |
+| POST | `/api/projects/select` | 同步 | 切换到指定项目 |
+| DELETE | `/api/projects/{name}` | 同步 | 删除项目 |
 | GET | `/api/config/api` | 同步 | 获取 API 配置 |
 | PUT | `/api/config/api` | 同步 | 保存 API 配置 |
 | GET | `/api/config` | 同步 | 获取故事配置 |
