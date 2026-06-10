@@ -154,7 +154,7 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var projects []map[string]string
+	projects := make([]map[string]string, 0)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

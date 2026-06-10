@@ -22,7 +22,7 @@
   async function loadProjects() {
     try {
       const list = await api('GET', '/api/projects');
-      projects.set(list);
+      projects.set(Array.isArray(list) ? list : []);
     } catch (e) {
       projects.set([]);
     }
