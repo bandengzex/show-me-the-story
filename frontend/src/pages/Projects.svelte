@@ -8,16 +8,7 @@
 
   const phaseLabels = { outline: '大纲', writing: '写作' };
 
-  onMount(async () => {
-    await loadProjects();
-    // Check if a project is already selected
-    try {
-      const cur = await api('GET', '/api/projects/current');
-      if (cur.name) {
-        currentProject.set(cur.name);
-      }
-    } catch (e) {}
-  });
+  onMount(loadProjects);
 
   async function loadProjects() {
     try {
