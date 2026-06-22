@@ -126,7 +126,7 @@ task dev                              # 编译并启动 Go 后端
 | `src/pages/Outline.svelte` | 大纲页：直接操作按钮（生成/确认/修订意见/删除/生成后续大纲）+ 导入续写 + pending 章节内联编辑 + 流式预览 + 标题/梗概展示优先 config（`preferUserValue` 一致）+ `ConfigChangePanel` |
 | `src/components/ConfigChangePanel.svelte` | AI 配置变更确认面板：展示 pending 提案（当前 vs 建议）、勾选采纳 / 全部忽略；SSE `config_change_proposal` 触发 |
 | `src/pages/Writing.svelte` | 写作页：章节列表（状态点）+ 直接操作（生成/确认/修改意见/去AI味，自动区分当前章修订与定向修订）+ 事实核查冲突处理面板（`pending_writing_conflict`，可选修改大纲/伏笔/重试/保留稿进入审核）+ 自动确认模式开关（toggle，随时可开关）+ 伏笔追踪摘要卡片（活跃/超期/临近回收）+ 优化章节衔接（进度卡片工具栏小按钮，已确认 ≥ 2 章时显示）+ 导出 TXT + 复制 + 上下章导航 + 流式尾部窗口展示（含「仅显示最新内容」提示；任务进行中当前章显示 taskTokenUsage，空闲时显示正文字数）+ rAF 自动滚动（自动确认模式下自动跟随正在生成的章节）+ 全书完成后展示 `PostProcessPanel` |
-| `src/components/TaskTokenBadge.svelte` | 任务 token 展示（`↑ prompt ↓ completion tokens`）；对 `taskTokenUsage` 更新做线性 rAF 插值，动画时长 = `TOKEN_POLL_INTERVAL_MS`；供 ChatPanel / App 顶栏 / Writing 页复用 |
+| `src/components/TaskTokenBadge.svelte` | 任务 token 展示（`↑ prompt ↓ completion tokens`）；对 `taskTokenUsage` 更新做线性 rAF 插值，动画时长 = `TOKEN_POLL_INTERVAL_MS`；目标值低于当前显示值时该维度从 0 重新向上插值（新一段统计或估算修正）；供 ChatPanel / App 顶栏 / Writing 页复用 |
 | `src/pages/Foreshadows.svelte` | 伏笔页：统计概览 + AI 设计伏笔 + 手动 CRUD + AI 建议确认面板（SSE `foreshadow_suggestions`）+ 伏笔-大纲冲突报告卡片（`last_foreshadow_outline_report`）+ 列表/章节时间线/路线图文档三视图 + 复制/下载 `Foreshadows.md` |
 | `src/components/PostProcessPanel.svelte` | 全书优化面板：开始全书分析（诊断+核查+路线图）/ 重新核查 / 重新生成路线图 / 清空；诊断与核查报告 Markdown 展示；优化工单表格（勾选、编辑意见、执行选项、diff 对比弹窗） |
 | `src/pages/Relations.svelte` | 图谱页：Canvas 力导向图谱（ForceGraph 类），支持拖拽、滚轮缩放（以光标为中心，0.3x–3x）、hover 高亮（强调 hover 节点与其连线，次强调直接相邻节点，其余淡化） |
@@ -199,7 +199,7 @@ func (h *Handlers) PostXxxAction(w http.ResponseWriter, r *http.Request) {
 - **节流缓冲**：`sse.js` 将 chunk 先累积到本地缓冲区，每 150ms 批量刷入 store
 - **尾部窗口**：章节流式全文只存 `sse.js` 模块级变量，`streamingContent` store 仅保留尾部约 3000 字符，每次刷新渲染成本恒定；写作页流式期间显示「仅显示最新内容」提示，生成结束后由 progress 重新拉取展示全文
 - **rAF 滚动**：写作页自动滚动合并到 `requestAnimationFrame`，每帧最多一次
-- **任务 token 追踪**：`tryStartTask()` 将 `TaskTokenUsage` 挂到 `taskCtx`；`api.go` 每次 LLM 调用累计 prompt/completion（优先 API `usage`，否则 rune×1.5 估算）；throttled SSE `token_usage` + 前端 poll `GET /api/status` 兜底（间隔见 `frontend/src/lib/tokenPoll.js` 的 `TOKEN_POLL_INTERVAL_MS`）；`TaskTokenBadge` 对该间隔内数字做线性 rAF 插值；ChatPanel 任务栏、App 顶栏「AI思考中」、Writing 当前章均展示 `↑ ↓ tokens`
+- **任务 token 追踪**：`tryStartTask()` 将 `TaskTokenUsage` 挂到 `taskCtx`；`api.go` 每次 LLM 调用累计 prompt/completion（优先 API `usage`，否则 rune×1.5 估算）；throttled SSE `token_usage` + 前端 poll `GET /api/status` 兜底（间隔见 `frontend/src/lib/tokenPoll.js` 的 `TOKEN_POLL_INTERVAL_MS`）；`TaskTokenBadge` 对该间隔内数字做线性 rAF 插值，目标低于当前显示时该维度从 0 重启动画；ChatPanel 任务栏、App 顶栏「AI思考中」、Writing 当前章均展示 `↑ ↓ tokens`
 - **progress 去抖**：`progress_update` 事件触发的 `/api/progress` 拉取（含全书正文的大 JSON）500ms 内合并为一次，`task_end` 时立即刷新
 
 `stream_start` 事件（每次章节流式输出开始时由后端发出）会清空缓冲与已生成字数计数，避免事实核查重试或自动连写时新旧内容叠加。

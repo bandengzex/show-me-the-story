@@ -35,10 +35,20 @@
 
   function startAnim(toP, toC) {
     stopAnim();
+    let fromP = displayPrompt;
+    let fromC = displayCompletion;
+    if (toP < displayPrompt) {
+      displayPrompt = 0;
+      fromP = 0;
+    }
+    if (toC < displayCompletion) {
+      displayCompletion = 0;
+      fromC = 0;
+    }
     anim = {
       start: performance.now(),
-      fromP: displayPrompt,
-      fromC: displayCompletion,
+      fromP,
+      fromC,
       toP,
       toC,
     };
