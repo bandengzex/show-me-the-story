@@ -76,6 +76,26 @@ var errorCatalog = map[string]map[string]string{
 		LangZH: "缺少 content 字段",
 		LangEN: "content field is required",
 	},
+	"missing_fields": {
+		LangZH: "缺少 fields 字段",
+		LangEN: "fields array is required",
+	},
+	"no_pending_changes": {
+		LangZH: "没有待确认的配置变更",
+		LangEN: "No pending config changes",
+	},
+	"load_pending_config_failed": {
+		LangZH: "加载待确认配置失败: %s",
+		LangEN: "Failed to load pending config changes: %s",
+	},
+	"save_pending_config_failed": {
+		LangZH: "保存待确认配置失败: %s",
+		LangEN: "Failed to save pending config changes: %s",
+	},
+	"delete_pending_config_failed": {
+		LangZH: "清除待确认配置失败: %s",
+		LangEN: "Failed to clear pending config changes: %s",
+	},
 	"invalid_chapter_num": {
 		LangZH: "无效的章节编号",
 		LangEN: "Invalid chapter number",
@@ -155,6 +175,10 @@ var errorCatalog = map[string]map[string]string{
 	"writing_chapter_cannot_delete": {
 		LangZH: "正在写作中的章节无法删除",
 		LangEN: "Cannot delete a chapter that is being written",
+	},
+	"delete_frontier_unavailable": {
+		LangZH: "当前写作前沿没有可删除的章节正文",
+		LangEN: "No chapter content at the writing frontier to delete",
 	},
 	"writing_range_has_writing": {
 		LangZH: "删除范围内有正在写作中的章节，无法删除",
@@ -406,6 +430,10 @@ var systemPrompts = map[string]map[string]string{
 		LangZH: "你是一位严谨的小说叙事一致性编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字。拿不准时视为无冲突。",
 		LangEN: "You are a strict narrative-consistency editor. Output strict JSON exactly as requested — no extra prose. When unsure, treat as no conflict.",
 	},
+	"outline_character_checker_json": {
+		LangZH: "你是一位严谨的小说设定编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字。拿不准时视为无未登记人物。",
+		LangEN: "You are a strict story-settings editor. Output strict JSON exactly as requested — no extra prose. When unsure, treat as no unregistered characters.",
+	},
 	"writing_conflict_analyst_json": {
 		LangZH: "你是一位资深小说编辑，擅长诊断大纲、伏笔与前情之间的矛盾。请严格按照要求的JSON格式输出，不要添加任何额外文字。",
 		LangEN: "You are a senior novel editor who diagnoses contradictions among outlines, foreshadows, and prior story. Output strict JSON exactly as requested — no extra prose.",
@@ -445,6 +473,10 @@ var systemPrompts = map[string]map[string]string{
 	"chapter_revision_suffix": {
 		LangZH: "\n你正在执行章节修订任务：只做修改意见要求的改动，其余原文保持不变，输出修改后的完整正文；不要添加任何元信息或说明性文字。",
 		LangEN: "\nYou are performing a chapter revision: make only the changes the feedback requires; leave everything else identical; output the full revised prose with no meta or explanatory text.",
+	},
+	"memory_manager": {
+		LangZH: "你是一位精准的小说叙事记忆管理员。请严格按照要求的JSON格式输出，不要添加任何额外文字。",
+		LangEN: "You are a precise narrative memory manager. Output strict JSON exactly as requested — no extra prose.",
 	},
 }
 

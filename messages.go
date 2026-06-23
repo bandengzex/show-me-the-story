@@ -306,6 +306,34 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "正文撰写完毕，共 %d 字",
 		LangEN: "Prose complete — %d characters",
 	},
+	"log.chapter_length_retry": {
+		LangZH: "[字数控制] 当前 %d 字，要求 %d–%d 字，正在第 %d 次重新撰写...",
+		LangEN: "[Length] Draft is %d chars, need %d–%d — regenerating (attempt %d)...",
+	},
+	"log.chapter_length_adjust": {
+		LangZH: "[字数控制] 重写后仍为 %d 字（要求 %d–%d 字），正在对原文压缩/扩展...",
+		LangEN: "[Length] Still %d chars after rewrite (need %d–%d) — compressing/expanding draft...",
+	},
+	"log.chapter_length_adjust_failed": {
+		LangZH: "[字数控制] 压缩/扩展失败: %v，保留最佳稿",
+		LangEN: "[Length] Compress/expand failed: %v — keeping best draft",
+	},
+	"log.chapter_length_soft_keep": {
+		LangZH: "[字数控制] 最佳稿 %d 字略超/略低于 %d–%d 字，在容忍范围内，跳过压缩/扩展",
+		LangEN: "[Length] Best draft %d chars is slightly outside %d–%d — within soft tolerance, skipping adjust",
+	},
+	"log.chapter_length_skip_adjust": {
+		LangZH: "[字数控制] 最佳稿 %d 字偏离 %d–%d 字过多，跳过压缩/扩展",
+		LangEN: "[Length] Best draft %d chars too far from %d–%d — skipping adjust",
+	},
+	"log.chapter_length_adjust_reverted": {
+		LangZH: "[字数控制] 压缩/扩展后 %d 字未优于最佳稿 %d 字（要求 %d–%d 字），保留最佳稿",
+		LangEN: "[Length] After adjust %d chars not better than best %d (need %d–%d) — keeping best draft",
+	},
+	"log.chapter_length_off_range": {
+		LangZH: "[字数控制] 压缩/扩展后仍为 %d 字（要求 %d–%d 字），请用户在审核时处理；自动确认模式下将继续下一章",
+		LangEN: "[Length] Still %d chars after adjust (need %d–%d) — please review manually; auto-confirm will continue to the next chapter",
+	},
 	"log.summary_done": {
 		LangZH: "摘要提炼完成",
 		LangEN: "Summary extraction complete",
@@ -438,6 +466,26 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "伏笔与大纲一致性检查通过 ✓",
 		LangEN: "Foreshadow/outline consistency check passed ✓",
 	},
+	"log.outline_chapters_too_short": {
+		LangZH: "第 %s 章大纲不足 %d 字，正在要求 AI 扩写…",
+		LangEN: "Chapter %s outline(s) under %d characters — asking AI to expand…",
+	},
+	"log.outline_chapters_still_short": {
+		LangZH: "第 %s 章大纲仍不足 %d 字（已重试），请在大纲页手动补充",
+		LangEN: "Chapter %s outline(s) still under %d characters after retry — please expand on the Outline page",
+	},
+	"log.outline_character_check_failed": {
+		LangZH: "大纲人物检查失败: %v",
+		LangEN: "Outline character check failed: %v",
+	},
+	"log.outline_character_report_save_failed": {
+		LangZH: "保存大纲人物检查报告失败: %v",
+		LangEN: "Failed to save outline character check report: %v",
+	},
+	"log.outline_character_check_pass": {
+		LangZH: "大纲人物与已登记角色一致 ✓",
+		LangEN: "Outline characters match registered list ✓",
+	},
 	"log.foreshadow_plan_parsed": {
 		LangZH: "伏笔方案解析完成，共 %d 条",
 		LangEN: "Foreshadow plan parsed — %d items",
@@ -453,6 +501,14 @@ var messageCatalog = map[string]map[string]string{
 	"log.foreshadow_sync_summary": {
 		LangZH: "伏笔状态已更新（活跃: %d, 已回收: %d）",
 		LangEN: "Foreshadow status updated (active: %d, resolved: %d)",
+	},
+	"log.memory_update_failed": {
+		LangZH: "叙事记忆更新失败（不影响本章）",
+		LangEN: "Narrative memory update failed (chapter unaffected)",
+	},
+	"log.memory_save_failed": {
+		LangZH: "叙事记忆保存失败",
+		LangEN: "Failed to save narrative memory",
 	},
 	"log.postprocess_material": {
 		LangZH: "全书材料：约 %d 字，预估 %d tokens，诊断模式：%s",

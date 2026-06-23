@@ -68,6 +68,12 @@ export const postprocess = writable(null);
 export const foreshadowSuggestions = writable([]);
 export const foreshadowShowSuggestions = writable(false);
 
+export const outlineCharacterSuggestions = writable([]);
+export const outlineCharacterShowSuggestions = writable(false);
+
+export const pendingConfigChanges = writable([]);
+export const showConfigChangePanel = writable(false);
+
 export function showConfirm(message, onConfirm) {
   confirmModal.set({ message, onConfirm });
 }

@@ -209,6 +209,33 @@ func buildAgentSystemPrompt(ctx *AgentContext, toolDesc string) string {
 	return buildAgentSystemPromptZH(ctx, toolDesc)
 }
 
+// calcSynopsisLengthRange returns recommended synopsis length bounds (characters)
+// scaled to planned total book length. ponytail: linear heuristic; tune divisors if field feels too short/long in practice.
+func calcSynopsisLengthRange(chapterCount, targetWordsPerChapter int) (minLen, maxLen int) {
+	if chapterCount < 1 {
+		chapterCount = 1
+	}
+	if targetWordsPerChapter < 1 {
+		targetWordsPerChapter = 2500
+	}
+	total := chapterCount * targetWordsPerChapter
+	minLen = total / 80
+	if minLen < 300 {
+		minLen = 300
+	}
+	maxLen = total / 35
+	if maxLen < 600 {
+		maxLen = 600
+	}
+	if maxLen > 5000 {
+		maxLen = 5000
+	}
+	if minLen > maxLen {
+		minLen = maxLen * 2 / 3
+	}
+	return minLen, maxLen
+}
+
 func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个小说创作助手，全权负责管理小说项目的一切操作，包括：生成/修订/确认大纲、生成/修订/确认章节、管理角色/世界观/组织/关系/伏笔、技能管理、项目配置等。\n\n")
@@ -218,7 +245,13 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 		sb.WriteString(fmt.Sprintf("小说标题: 《%s》\n", ctx.State.Title))
 	}
 	sb.WriteString(fmt.Sprintf("当前阶段: %s\n", ctx.State.Phase))
-	sb.WriteString(fmt.Sprintf("章节数: %d\n", len(ctx.State.Chapters)))
+	sb.WriteString(fmt.Sprintf("配置章节数: %d\n", ctx.Config.Story.ChapterCount))
+	sb.WriteString(fmt.Sprintf("当前大纲章节数: %d\n", len(ctx.State.Chapters)))
+	sb.WriteString(fmt.Sprintf("每章目标字数: %d\n", ctx.Config.Story.TargetWordsPerChapter))
+	totalWords := ctx.Config.Story.ChapterCount * ctx.Config.Story.TargetWordsPerChapter
+	synMin, synMax := calcSynopsisLengthRange(ctx.Config.Story.ChapterCount, ctx.Config.Story.TargetWordsPerChapter)
+	sb.WriteString(fmt.Sprintf("全书计划总字数: 约 %d 字\n", totalWords))
+	sb.WriteString(fmt.Sprintf("故事梗概建议字数: %d–%d 字\n", synMin, synMax))
 
 	if ctx.Settings != nil {
 		sb.WriteString(fmt.Sprintf("角色数: %d\n", len(ctx.Settings.Characters)))
@@ -237,6 +270,11 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 		if name, ok := pageNames[ctx.ContextPage]; ok {
 			sb.WriteString(fmt.Sprintf("\n用户当前正在查看「%s」页面。\n", name))
 		}
+	}
+
+	if frontierInfo := formatWritingFrontierInfo(ctx.State, LangZH); frontierInfo != "" {
+		sb.WriteString("\n")
+		sb.WriteString(frontierInfo)
 	}
 
 	sb.WriteString("\n")
@@ -271,15 +309,18 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 	sb.WriteString("## 安全规则（最高优先级，违反将造成用户数据永久丢失）\n")
 	sb.WriteString("1. **修改 ≠ 删除**。当用户要求「修改/调整/润色/修正某一章」时，必须且只能使用 revise_chapter 工具（通过 num 参数指定章节号）。绝对禁止通过 delete_chapter / delete_chapters_from / delete_outline / reset_progress 来实现任何形式的「修改」需求。\n")
 	sb.WriteString("2. revise_chapter 支持修订任意已有内容的章节（包括已确认的早期章节），它只改动目标章节本身，不影响其他章节。修改第 6 章的细节就调用 revise_chapter(num=6, feedback=具体意见)，仅此而已。\n")
-	sb.WriteString("3. 删除类工具（delete_chapter、delete_chapters_from、delete_outline、reset_progress）是不可逆的危险操作，仅当用户**明确使用「删除/清空/重置」等字眼**并指明范围时才可使用。使用前必须：先用一条纯文本回复向用户复述将被删除的确切范围（如「将清除第 6~30 章共 25 章的正文内容（大纲保留）」），等用户明确回复确认后，才在下一轮调用工具并传入 confirm=true。注意：delete_chapter / delete_chapters_from 只清除正文（Content、Summary、markdown 文件），保留大纲，章节状态重置为 pending；delete_outline / reset_progress 才会删除大纲和全部数据。\n")
-	sb.WriteString("4. 任何情况下都不要为了「让操作更彻底」「方便重新生成」而扩大删除范围。宁可少做，不可多删。\n")
+	sb.WriteString("3. 删除类工具（delete_chapter、delete_chapters_from、delete_outline、reset_progress）是不可逆的危险操作，仅当用户**明确使用「删除/清空/重置」等字眼**并指明范围时才可使用。使用前必须：先用一条纯文本回复向用户复述将被删除的确切范围（如「将清除第 6~30 章共 25 章的正文内容（大纲保留）」），等用户明确回复确认后，才在下一轮调用工具并传入 confirm=true。注意：delete_chapter / delete_chapters_from 只清除正文（Content、Summary、markdown 文件），保留大纲条目且**不会减少章节总数**；delete_outline / reset_progress 才会删除大纲和全部数据。\n")
+	sb.WriteString("4. 不要扩大删除范围。例外：用户要求「重新生成大纲」「改成 N 章」「整本重写大纲」且尚无已确认章节时，应走「update_project_config + generate_outline」流程，**不是** delete 操作，也**不需要**先 delete_outline。\n")
 	sb.WriteString("5. 拿不准用户意图时，先提问澄清，不要猜测着执行写操作。\n\n")
 
 	sb.WriteString("## 工具选择指南\n")
 	sb.WriteString("- 修改某章内容细节 → revise_chapter(num, feedback)（AI 重写整章）\n")
 	sb.WriteString("- 局部编辑某章（替换行/替换文本/插入/追加）→ edit_chapter_content(num, operation, ...)（精确编辑，不重写整章，适合微调个别段落或修正错误）\n")
 	sb.WriteString("- 修改某章的大纲（未写作的 pending 章节）→ edit_chapter_outline(num, title, outline)\n")
-	sb.WriteString("- 对整体大纲提修改意见 → revise_outline(feedback)（只会改动未确认章节）\n")
+	sb.WriteString("- 对现有大纲提修改意见且**章数不变** → revise_outline(feedback)（只更新未确认章节的标题/大纲，不能增减章节总数）\n")
+	sb.WriteString("- **调整总章数 / 整本重写大纲**（尚无已确认章节）→ ① update_project_config(chapter_count, target_words_per_chapter) ② generate_outline。generate_outline 会**完全替换**当前全部 pending 大纲；无需先 delete_outline，禁止用 revise_outline 缩章/增章，禁止用 delete_chapters_from\n")
+	sb.WriteString("- 删除写作前沿章节正文（待确认章，或已确认但下一章尚未开始写作）→ delete_chapter。先核对项目信息中的「delete_chapter 当前可删」章号；**禁止**为此使用 delete_chapters_from\n")
+	sb.WriteString("- 删除更早某一章及之后全部正文 → delete_chapters_from(num)（从第 num 章清到全书末章，须先向用户复述范围并确认）。若用户只想删前沿那一章，必须用 delete_chapter\n")
 	sb.WriteString("- 生成下一章正文 → generate_chapter\n")
 	sb.WriteString("- 已有确认章节、想追加新章节 → 不要用 generate_outline（会被拒绝），告知用户在大纲页使用「生成后续大纲」\n\n")
 
@@ -288,6 +329,8 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 	sb.WriteString("- 调用工具时，**不要输出任何解释文字**，直接输出 <tool_call> 标签。解释放在收到工具结果之后。\n")
 	sb.WriteString("- 当用户提交故事配置时（如「请更新以下故事配置」），使用 update_project_config 工具。\n")
 	sb.WriteString("- 当用户提交写作风格或故事梗概的更新时（如「请更新写作风格:」或「请更新故事梗概:」），使用 update_project_config 工具保存对应字段。\n")
+	sb.WriteString(fmt.Sprintf("- **故事梗概撰写**：根据全书计划总字数，梗概建议 %d–%d 字。从对话中提炼梗概时，尽可能保留用户描述的情节线、人物关系、关键转折、世界观与设定细节，不要过度压缩成几句泛泛之谈；篇幅越长的小说需要更详尽的梗概才能支撑后续大纲与写作。\n", synMin, synMax))
+	sb.WriteString("- **配置保护**：若某字段用户已在配置页填写（非空），你不得静默覆盖。需要修改时，先在对话中说明当前值与建议值的差异及理由，等用户明确同意后再调用 update_project_config 并传入 confirm_overwrite=true。\n")
 	sb.WriteString("- 当用户要求创建/修改角色、世界观等设定时，直接使用对应的工具完成操作。\n")
 	sb.WriteString("- 当用户要求生成大纲、生成章节等操作时，使用对应的工具。如果是异步工具，告知用户等待。\n")
 	sb.WriteString("- 在生成大纲之前，提醒用户检查配置页面中的各项设定（故事类型、写作风格、故事梗概、角色、世界观），确认无误后再进行。\n")
@@ -308,7 +351,13 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 		sb.WriteString(fmt.Sprintf("Novel title: \"%s\"\n", ctx.State.Title))
 	}
 	sb.WriteString(fmt.Sprintf("Current phase: %s\n", ctx.State.Phase))
-	sb.WriteString(fmt.Sprintf("Chapter count: %d\n", len(ctx.State.Chapters)))
+	sb.WriteString(fmt.Sprintf("Configured chapter count: %d\n", ctx.Config.Story.ChapterCount))
+	sb.WriteString(fmt.Sprintf("Current outline chapter count: %d\n", len(ctx.State.Chapters)))
+	sb.WriteString(fmt.Sprintf("Target words per chapter: %d\n", ctx.Config.Story.TargetWordsPerChapter))
+	totalWords := ctx.Config.Story.ChapterCount * ctx.Config.Story.TargetWordsPerChapter
+	synMin, synMax := calcSynopsisLengthRange(ctx.Config.Story.ChapterCount, ctx.Config.Story.TargetWordsPerChapter)
+	sb.WriteString(fmt.Sprintf("Planned total book length: ~%d words\n", totalWords))
+	sb.WriteString(fmt.Sprintf("Recommended synopsis length: %d–%d characters\n", synMin, synMax))
 
 	if ctx.Settings != nil {
 		sb.WriteString(fmt.Sprintf("Characters: %d\n", len(ctx.Settings.Characters)))
@@ -327,6 +376,11 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 		if name, ok := pageNames[ctx.ContextPage]; ok {
 			sb.WriteString(fmt.Sprintf("\nThe user is currently viewing the \"%s\" page.\n", name))
 		}
+	}
+
+	if frontierInfo := formatWritingFrontierInfo(ctx.State, LangEN); frontierInfo != "" {
+		sb.WriteString("\n")
+		sb.WriteString(frontierInfo)
 	}
 
 	sb.WriteString("\n")
@@ -361,15 +415,18 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 	sb.WriteString("## Safety rules (highest priority — violating them causes permanent user-data loss)\n")
 	sb.WriteString("1. **Edit != Delete**. When the user asks to \"revise/adjust/polish/fix chapter N\", you MUST use the revise_chapter tool (pass the chapter number via the num argument). NEVER use delete_chapter / delete_chapters_from / delete_outline / reset_progress to satisfy any kind of \"edit\" request.\n")
 	sb.WriteString("2. revise_chapter can revise any chapter that has content (including confirmed early chapters); it only modifies the target chapter and never touches the others. To tweak chapter 6, call revise_chapter(num=6, feedback=specific instructions). That's it.\n")
-	sb.WriteString("3. Delete tools (delete_chapter, delete_chapters_from, delete_outline, reset_progress) are irreversible. Only use them when the user explicitly says \"delete/clear/reset\" and specifies the range. Before using one, first reply in plain text restating the exact range that will be affected (e.g. \"will clear content of chapters 6-30, 25 chapters — outlines will be preserved\") and wait for the user's explicit confirmation; then on the next turn call the tool with confirm=true. Note: delete_chapter / delete_chapters_from only clear content (Content, Summary, markdown file), keeping outlines and resetting chapter status to pending; delete_outline / reset_progress delete outlines and all data.\n")
-	sb.WriteString("4. Never widen the delete range \"for cleanliness\" or \"to make regeneration easier\". Prefer doing less to doing too much.\n")
+	sb.WriteString("3. Delete tools (delete_chapter, delete_chapters_from, delete_outline, reset_progress) are irreversible. Only use them when the user explicitly says \"delete/clear/reset\" and specifies the range. Before using one, first reply in plain text restating the exact range that will be affected (e.g. \"will clear content of chapters 6-30, 25 chapters — outlines will be preserved\") and wait for the user's explicit confirmation; then on the next turn call the tool with confirm=true. Note: delete_chapter / delete_chapters_from only clear content (Content, Summary, markdown file), keeping outline entries and **do not reduce the total chapter count**; delete_outline / reset_progress delete outlines and all data.\n")
+	sb.WriteString("4. Never widen the delete range. Exception: when the user asks to \"regenerate the outline\", \"change to N chapters\", or \"rewrite the whole outline\" and there are no confirmed chapters yet, use update_project_config + generate_outline — that is **not** a delete operation and does **not** require delete_outline first.\n")
 	sb.WriteString("5. When user intent is ambiguous, ask a clarifying question instead of guessing into a write operation.\n\n")
 
 	sb.WriteString("## Tool-selection guidance\n")
 	sb.WriteString("- Tweak chapter content -> revise_chapter(num, feedback) (AI rewrites the whole chapter)\n")
 	sb.WriteString("- Surgical edit of a chapter (replace lines/replace text/insert/append) -> edit_chapter_content(num, operation, ...) (precise edit without full rewrite; ideal for tweaking a paragraph or fixing a typo)\n")
 	sb.WriteString("- Edit a pending chapter's outline -> edit_chapter_outline(num, title, outline)\n")
-	sb.WriteString("- Give feedback on the overall outline -> revise_outline(feedback) (only touches unconfirmed chapters)\n")
+	sb.WriteString("- Give feedback on the existing outline while **keeping the same chapter count** -> revise_outline(feedback) (updates title/outline of unconfirmed chapters only; cannot add or remove chapters)\n")
+	sb.WriteString("- **Change total chapter count / regenerate the whole outline** (no confirmed chapters yet) -> ① update_project_config(chapter_count, target_words_per_chapter) ② generate_outline. generate_outline **fully replaces** all pending outlines; no delete_outline first, never use revise_outline to shrink/grow chapter count, never use delete_chapters_from\n")
+	sb.WriteString("- Delete prose at the writing frontier (chapter in review, or last accepted while the next chapter has not started) -> delete_chapter. Check \"delete_chapter can remove\" in project info; **never** use delete_chapters_from for this\n")
+	sb.WriteString("- Delete an earlier chapter and all prose after it -> delete_chapters_from(num) (clears chapter num through the last outline slot; restate the range and get confirmation). If the user only wants the frontier chapter removed, use delete_chapter\n")
 	sb.WriteString("- Generate the next chapter's prose -> generate_chapter\n")
 	sb.WriteString("- Confirmed chapters exist and the user wants to append more -> do NOT use generate_outline (it will be rejected); tell the user to use \"Generate Continuation Outline\" on the Outline page\n\n")
 
@@ -378,6 +435,8 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 	sb.WriteString("- When calling a tool, **output NO explanatory text** — emit the <tool_call> tag directly. Explain after you receive the tool result.\n")
 	sb.WriteString("- When the user submits a story-config update (e.g. \"please update the following story config\"), use update_project_config.\n")
 	sb.WriteString("- When the user submits a writing-style or synopsis update (e.g. \"please update writing style:\" or \"please update synopsis:\"), use update_project_config to save the corresponding field.\n")
+	sb.WriteString(fmt.Sprintf("- **Writing the synopsis**: Scale length to the planned total book size; aim for %d–%d characters. When distilling the user's conversation into a synopsis, preserve plot threads, character relationships, key turning points, and world-building details as much as possible — do not over-compress into a few generic sentences. Longer novels need a richer synopsis to support outline and chapter generation.\n", synMin, synMax))
+	sb.WriteString("- **Config protection**: If a field is already filled in by the user (non-empty), you must NOT overwrite it silently. Explain the diff and your reasoning in chat, wait for explicit user approval, then call update_project_config with confirm_overwrite=true.\n")
 	sb.WriteString("- When the user asks you to create/edit characters, worldview, etc., use the corresponding tool directly.\n")
 	sb.WriteString("- When the user asks for outline/chapter generation, use the corresponding tool. If async, tell the user to wait.\n")
 	sb.WriteString("- Before generating the outline, remind the user to check the Config page (story type, writing style, synopsis, characters, worldview) and confirm everything looks right.\n")
@@ -692,7 +751,7 @@ func getBuiltinTools() []Tool {
 				}
 
 				for _, c := range ctx.Settings.Characters {
-					if c.ID == params.ID || c.Name == params.ID {
+					if c.ID == params.ID || c.Name == params.ID || stripNameMarks(c.Name) == params.ID {
 						data, _ := json.MarshalIndent(c, "", "  ")
 						return string(data), nil
 					}
@@ -926,7 +985,7 @@ func getBuiltinTools() []Tool {
 				}
 
 				for i, c := range ctx.Settings.Characters {
-					if c.ID == params.ID || c.Name == params.ID {
+					if c.ID == params.ID || c.Name == params.ID || stripNameMarks(c.Name) == params.ID {
 						if params.Name != "" {
 							ctx.Settings.Characters[i].Name = params.Name
 						}
@@ -976,7 +1035,7 @@ func getBuiltinTools() []Tool {
 				json.Unmarshal(args, &params)
 
 				for i, c := range ctx.Settings.Characters {
-					if c.ID == params.ID || c.Name == params.ID {
+					if c.ID == params.ID || c.Name == params.ID || stripNameMarks(c.Name) == params.ID {
 						ctx.Settings.Characters = append(ctx.Settings.Characters[:i], ctx.Settings.Characters[i+1:]...)
 						if err := SaveProjectSettings(ctx.SettingsPath, ctx.Settings); err != nil {
 							return "", agentErr(ctx, "save_failed", err)
@@ -1100,8 +1159,8 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "update_project_config",
-			Description: "更新故事配置。如果存在已确认章节，会自动触发设定协调。",
-			Parameters:  `{"type": "故事类型", "title": "标题", "chapter_count": 30, "target_words_per_chapter": 2500, "writing_style": "写作风格", "writing_pov": "叙述视角", "story_synopsis": "故事梗概"}`,
+			Description: "更新故事配置（含 chapter_count、target_words_per_chapter 等）。generate_outline 读取此处的章数与每章字数生成大纲；用户要「改成 N 章重新生成」时必须先调用本工具再 generate_outline。story_synopsis 应按全书计划总字数写足（见系统提示中的建议字数），尽量保留用户在对话中描述的情节与设定细节。存在已确认章节时会自动触发设定协调。覆盖用户已填字段需 confirm_overwrite=true。",
+			Parameters:  `{"type": "故事类型", "title": "标题", "chapter_count": 30, "target_words_per_chapter": 2500, "writing_style": "写作风格", "writing_pov": "叙述视角", "story_synopsis": "故事梗概（篇幅随全书总字数调整，勿过度压缩）", "confirm_overwrite": false}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				var params struct {
 					Type                  string `json:"type"`
@@ -1111,9 +1170,32 @@ func getBuiltinTools() []Tool {
 					WritingStyle          string `json:"writing_style"`
 					WritingPOV            string `json:"writing_pov"`
 					StorySynopsis         string `json:"story_synopsis"`
+					ConfirmOverwrite      bool   `json:"confirm_overwrite"`
 				}
 				if err := json.Unmarshal(args, &params); err != nil {
 					return "", agentErr(ctx, "invalid_json", err)
+				}
+
+				proposed := ctx.Config.Story
+				if params.Type != "" {
+					proposed.Type = params.Type
+				}
+				if params.Title != "" {
+					proposed.Title = params.Title
+				}
+				if params.WritingStyle != "" {
+					proposed.WritingStyle = params.WritingStyle
+				}
+				if params.WritingPOV != "" {
+					proposed.WritingPOV = params.WritingPOV
+				}
+				if params.StorySynopsis != "" {
+					proposed.StorySynopsis = params.StorySynopsis
+				}
+
+				conflicts := collectStoryConfigConflicts(ctx.Config.Story, proposed, "agent", "")
+				if len(conflicts) > 0 && !params.ConfirmOverwrite {
+					return formatConfigConflictMessage(conflicts, ctx.Config.Language), nil
 				}
 
 				if params.Type != "" {
@@ -1138,8 +1220,17 @@ func getBuiltinTools() []Tool {
 					ctx.Config.Story.StorySynopsis = params.StorySynopsis
 				}
 
+				syncProgressMetaFromStory(ctx.State, ctx.Config.Story)
+
 				if err := saveConfig(ctx.CfgPath, ctx.Config); err != nil {
 					return "", agentErr(ctx, "save_config_failed", err)
+				}
+
+				if params.ConfirmOverwrite {
+					pendingPath := PendingConfigChangesPath(ctx.ProgressPath)
+					for _, c := range conflicts {
+						_ = removePendingFields(pendingPath, c.Field)
+					}
 				}
 
 				hasAccepted := false
@@ -1153,7 +1244,7 @@ func getBuiltinTools() []Tool {
 				if hasAccepted && ctx.StartAsync != nil {
 					newSettings := ctx.Config.Story
 					ctx.StartAsync("settings_reconciliation", func(goCtx context.Context) error {
-						err := ReconcileSettingsAction(goCtx, ctx.APICfg, ctx.Config, ctx.State, newSettings, ctx.ProgressPath, ctx.CfgPath, ctx.Logger)
+						err := ReconcileSettingsAction(goCtx, ctx.APICfg, ctx.Config, ctx.State, newSettings, ctx.Settings, ctx.ProgressPath, ctx.CfgPath, ctx.Logger)
 						if err != nil {
 							ctx.Logger.Error(fmt.Sprintf("设定协调失败: %v", err))
 						}
@@ -1170,7 +1261,7 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "generate_outline",
-			Description: "生成小说大纲（异步）。注意：存在已确认章节时不可用（会覆盖已完成内容），追加章节请引导用户使用大纲页的「生成后续大纲」。",
+			Description: "生成小说大纲（异步）。按 config 中的 chapter_count 与 target_words_per_chapter 调用 AI，**完全替换**当前全部章节大纲（pending 阶段，无需先 delete_outline）。用户要求「重新生成」「改成 N 章」「整本重写大纲」且尚无已确认章节时：先 update_project_config 更新章数/字数，再调用本工具；禁止用 revise_outline 缩章/增章。存在已确认章节时不可用；追加章节请引导用户使用大纲页的「生成后续大纲」。",
 			Parameters:  `{}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				if ctx.StartAsync == nil {
@@ -1185,7 +1276,7 @@ func getBuiltinTools() []Tool {
 					}
 				}
 				ctx.StartAsync("outline_generation", func(goCtx context.Context) error {
-					err := GenerateOutlineAction(goCtx, ctx.APICfg, ctx.Config, ctx.State, ctx.ProgressPath, ctx.Logger)
+					err := GenerateOutlineAction(goCtx, ctx.APICfg, ctx.Config, ctx.State, ctx.Settings, ctx.ProgressPath, ctx.CfgPath, ctx.Logger)
 					if err != nil {
 						ctx.Logger.Error(fmt.Sprintf("大纲生成失败: %v", err))
 					}
@@ -1214,7 +1305,7 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "revise_outline",
-			Description: "根据反馈修订大纲（异步）",
+			Description: "根据反馈修订大纲（异步）。**仅适用于章数不变**的调整（改剧情、改某章情节等）；**不能**增减章节总数。用户要缩章/增章/整本重生时，应 update_project_config + generate_outline，不要用本工具。",
 			Parameters:  `{"feedback": "修改意见"}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				var params struct {
@@ -1228,7 +1319,7 @@ func getBuiltinTools() []Tool {
 				}
 				feedback := params.Feedback
 				ctx.StartAsync("outline_revision", func(goCtx context.Context) error {
-					err := ReviseOutlineAction(goCtx, ctx.APICfg, ctx.Config, ctx.State, ctx.ProgressPath, feedback, ctx.Logger)
+					err := ReviseOutlineAction(goCtx, ctx.APICfg, ctx.Config, ctx.State, ctx.Settings, ctx.ProgressPath, ctx.CfgPath, feedback, ctx.Logger)
 					if err != nil {
 						ctx.Logger.Error(fmt.Sprintf("大纲修订失败: %v", err))
 					}
@@ -1239,7 +1330,7 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "delete_outline",
-			Description: "【危险·不可逆】删除整个大纲及全部章节数据。仅当用户明确要求删除大纲时使用，且必须先向用户确认。严禁用于实现「修改大纲」的需求——修改请用 revise_outline 或 edit_chapter_outline。",
+			Description: "【危险·不可逆】清空整个大纲及全部章节数据。仅当用户明确要求「删除/清空大纲」且暂不需要立即重新生成时使用。用户要「删掉重生成 N 章」且无已确认章节时，直接 update_project_config + generate_outline，无需先调用本工具。严禁用于修改单章大纲/正文。",
 			Parameters:  `{"confirm": true}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				if msg := requireConfirm(ctx, args, fmt.Sprintf("删除整个大纲（共 %d 章）", len(ctx.State.Chapters))); msg != "" {
@@ -1424,37 +1515,48 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "delete_chapter",
-			Description: "【危险·不可逆】清除最后一个章节的正文内容（保留大纲）。仅当用户明确要求删除时使用，且必须先向用户确认。",
+			Description: "【危险·不可逆】清除写作前沿章节的正文（保留大纲）。前沿=CurrentChapterIndex 处 review 章，或下一章 pending 时前一 accepted 章，或全书已确认时的最后一章。仅删这一章；删更早章节须用 delete_chapters_from。须先向用户确认。",
 			Parameters:  `{"confirm": true}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
-				if msg := requireConfirm(ctx, args, "清除最后一个章节的正文"); msg != "" {
-					return msg, nil
-				}
 				if len(ctx.State.Chapters) == 0 {
 					return "", agentErr(ctx, "no_chapters_to_delete")
 				}
-				lastIdx := len(ctx.State.Chapters) - 1
-				ch := &ctx.State.Chapters[lastIdx]
-				if ch.Status == StatusWriting {
-					return "", agentErr(ctx, "writing_chapter_cannot_delete")
+				idx, resolveErr := resolveDeleteChapterTarget(ctx.State)
+				if resolveErr != nil {
+					switch resolveErr {
+					case ErrWritingChapterCannotDelete:
+						return "", agentErr(ctx, "writing_chapter_cannot_delete")
+					case ErrDeleteFrontierUnavailable:
+						return "", agentErr(ctx, "delete_frontier_unavailable")
+					default:
+						return "", agentErr(ctx, "no_chapters_to_delete")
+					}
 				}
-				deleteFile(ChapterMarkdownPath(ctx.ProjectDir, ch.Num))
-				ch.Content = ""
-				ch.Summary = ""
-				ch.Status = StatusPending
-				if ctx.State.CurrentChapterIndex > lastIdx {
-					ctx.State.CurrentChapterIndex = lastIdx
+				targetNum := ctx.State.Chapters[idx].Num
+				if msg := requireConfirm(ctx, args, fmt.Sprintf("清除第 %d 章正文（写作前沿）", targetNum)); msg != "" {
+					return msg, nil
+				}
+				num, err := DeleteFrontierChapter(ctx.State, ctx.ProjectDir)
+				if err != nil {
+					switch err {
+					case ErrWritingChapterCannotDelete:
+						return "", agentErr(ctx, "writing_chapter_cannot_delete")
+					case ErrDeleteFrontierUnavailable:
+						return "", agentErr(ctx, "delete_frontier_unavailable")
+					default:
+						return "", agentErr(ctx, "no_chapters_to_delete")
+					}
 				}
 				if err := SaveProgress(ctx.ProgressPath, ctx.State); err != nil {
 					return "", agentErr(ctx, "save_progress_failed", err)
 				}
-				ctx.Logger.SuccessKey("log.chapter_deleted", ch.Num)
-				return agentMsg(ctx, "agent.chapter_deleted", ch.Num), nil
+				ctx.Logger.SuccessKey("log.chapter_deleted", num)
+				return agentMsg(ctx, "agent.chapter_deleted", num), nil
 			},
 		},
 		{
 			Name:        "delete_chapters_from",
-			Description: "【危险·不可逆】从指定章节到末尾清除正文内容（保留大纲）。仅当用户明确要求批量删除正文时使用，且必须先向用户复述删除范围并获得确认。严禁用于实现「修改某章」的需求——修改请用 revise_chapter。",
+			Description: "【危险·不可逆】从指定章节到末尾清除正文内容（保留大纲条目，**不减少章节总数**）。仅当用户明确要求批量删除已写正文时使用。不能用于缩章、不能用于重新生成大纲——缩章/重生请用 update_project_config + generate_outline。修改某章请用 revise_chapter。",
 			Parameters:  `{"num": 6, "confirm": true}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				var params struct {

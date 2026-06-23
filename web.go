@@ -44,6 +44,9 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, state *Pr
 	// Project-scoped endpoints (require project selection)
 	mux.HandleFunc("GET /api/config", h.GetConfig)
 	mux.HandleFunc("PUT /api/config", h.PutConfig)
+	mux.HandleFunc("GET /api/config/pending-changes", h.GetPendingConfigChanges)
+	mux.HandleFunc("POST /api/config/apply-changes", h.PostApplyConfigChanges)
+	mux.HandleFunc("DELETE /api/config/pending-changes", h.DeletePendingConfigChanges)
 	mux.HandleFunc("GET /api/progress", h.GetProgress)
 	mux.HandleFunc("DELETE /api/progress", h.DeleteProgress)
 	mux.HandleFunc("GET /api/status", h.GetStatus)
@@ -52,6 +55,7 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, state *Pr
 	mux.HandleFunc("POST /api/outline/confirm", h.PostOutlineConfirm)
 	mux.HandleFunc("POST /api/outline/revise", h.PostOutlineRevise)
 	mux.HandleFunc("POST /api/outline/generate-continuation", h.PostOutlineGenerateContinuation)
+	mux.HandleFunc("POST /api/outline/characters/confirm", h.PostOutlineCharactersConfirm)
 	mux.HandleFunc("PUT /api/outline/{num}", h.PutChapterOutline)
 
 	mux.HandleFunc("POST /api/chapter/generate", h.PostChapterGenerate)

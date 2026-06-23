@@ -159,6 +159,10 @@ func (lb *LogBroadcaster) ForeshadowOutlineConflicts(report *ForeshadowOutlineRe
 	lb.Emit("foreshadow_outline_conflicts", report)
 }
 
+func (lb *LogBroadcaster) OutlineCharacterSuggestions(suggestions []OutlineCharacterSuggestion) {
+	lb.Emit("outline_character_suggestions", suggestions)
+}
+
 func (lb *LogBroadcaster) WritingConflict(conflict *WritingConflict) {
 	lb.Emit("writing_conflict", conflict)
 }
@@ -173,6 +177,10 @@ func (lb *LogBroadcaster) SettingsReconciled(data interface{}) {
 
 func (lb *LogBroadcaster) SettingsUpdated() {
 	lb.Emit("settings_updated", map[string]string{"status": "ok"})
+}
+
+func (lb *LogBroadcaster) ConfigChangeProposal(changes []ConfigFieldChange) {
+	lb.Emit("config_change_proposal", changes)
 }
 
 func (lb *LogBroadcaster) PostProcessReport(reportType, content string) {

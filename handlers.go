@@ -382,6 +382,78 @@ func (h *Handlers) PutConfig(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.cfg)
 }
 
+func (h *Handlers) GetPendingConfigChanges(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	pending, err := LoadPendingConfigChanges(PendingConfigChangesPath(h.progressPath))
+	if err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "load_pending_config_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, pending)
+}
+
+func (h *Handlers) PostApplyConfigChanges(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	var body struct {
+		Fields []string `json:"fields"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Fields) == 0 {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_fields")
+		return
+	}
+
+	pendingPath := PendingConfigChangesPath(h.progressPath)
+	pending, err := LoadPendingConfigChanges(pendingPath)
+	if err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "load_pending_config_failed", err.Error())
+		return
+	}
+	if len(pending.Changes) == 0 {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "no_pending_changes")
+		return
+	}
+
+	applySelectedPendingChanges(h.cfg, h.state, pending, body.Fields)
+
+	if err := saveConfig(h.cfgPath, h.cfg); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_config_failed", err.Error())
+		return
+	}
+	if err := SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+	if err := removePendingFields(pendingPath, body.Fields...); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_pending_config_failed", err.Error())
+		return
+	}
+
+	h.logger.SettingsUpdated()
+	h.broadcastProgress()
+	h.writeJSON(w, http.StatusOK, h.cfg)
+}
+
+func (h *Handlers) DeletePendingConfigChanges(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	if err := SavePendingConfigChanges(PendingConfigChangesPath(h.progressPath), &PendingConfigChanges{}); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "delete_pending_config_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+}
+
 func (h *Handlers) GetProgress(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.state)
 }
@@ -454,7 +526,7 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 		ctx := h.taskCtx
 
 		h.logger.InfoKey("log.outline_generating")
-		err := GenerateOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
+		err := GenerateOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, h.progressPath, h.cfgPath, h.logger)
 
 		if err != nil {
 			if ctx.Err() != nil {
@@ -521,7 +593,7 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 		ctx := h.taskCtx
 
 		h.logger.InfoKey("log.outline_revising")
-		err := ReviseOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
+		err := ReviseOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, h.progressPath, h.cfgPath, body.Feedback, h.logger)
 
 		if err != nil {
 			if ctx.Err() != nil {
@@ -540,6 +612,68 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+func (h *Handlers) PostOutlineCharactersConfirm(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+
+	var req struct {
+		Characters []OutlineCharacterSuggestion `json:"characters"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if len(req.Characters) == 0 {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", "characters required")
+		return
+	}
+
+	if h.settings == nil {
+		h.settings = &ProjectSettings{}
+	}
+
+	existing := registeredCharacterNameSet(h.settings)
+	for _, item := range req.Characters {
+		name := strings.TrimSpace(stripNameMarks(item.Name))
+		if name == "" || existing[name] {
+			continue
+		}
+		notes := strings.TrimSpace(item.Description)
+		if role := strings.TrimSpace(item.Role); role != "" {
+			if notes != "" {
+				notes += "；"
+			}
+			notes += role
+		}
+		h.settings.Characters = append(h.settings.Characters, Character{
+			ID:       h.settings.nextCharacterID(),
+			Name:     name,
+			Background: notes,
+			Notes:    fmt.Sprintf("首次登场：第%d章", item.ChapterNum),
+		})
+		existing[name] = true
+	}
+
+	if err := SaveProjectSettings(h.settingsPath, h.settings); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_failed", err.Error())
+		return
+	}
+
+	if h.state.LastOutlineCharacterReport != nil {
+		h.state.LastOutlineCharacterReport.HasSuggestions = false
+		h.state.LastOutlineCharacterReport.Suggestions = nil
+		h.state.LastOutlineCharacterReport.Summary = "已采纳建议并登记角色"
+		_ = SaveProgress(h.progressPath, h.state)
+	}
+
+	h.logger.SettingsUpdated()
+	h.writeJSON(w, http.StatusOK, h.settings.Characters)
 }
 
 func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
@@ -911,26 +1045,19 @@ func (h *Handlers) DeleteChapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(h.state.Chapters) == 0 {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "no_chapters_to_delete")
+	num, err := DeleteFrontierChapter(h.state, h.projectDir())
+	if err != nil {
+		switch err {
+		case ErrNoChaptersToDelete:
+			h.writeErrorReq(w, r, http.StatusBadRequest, "no_chapters_to_delete")
+		case ErrWritingChapterCannotDelete:
+			h.writeErrorReq(w, r, http.StatusConflict, "writing_chapter_cannot_delete")
+		case ErrDeleteFrontierUnavailable:
+			h.writeErrorReq(w, r, http.StatusConflict, "delete_frontier_unavailable")
+		default:
+			h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		}
 		return
-	}
-
-	lastIdx := len(h.state.Chapters) - 1
-	ch := &h.state.Chapters[lastIdx]
-
-	if ch.Status == StatusWriting {
-		h.writeErrorReq(w, r, http.StatusConflict, "writing_chapter_cannot_delete")
-		return
-	}
-
-	deleteFile(ChapterMarkdownPath(h.projectDir(), ch.Num))
-	ch.Content = ""
-	ch.Summary = ""
-	ch.Status = StatusPending
-
-	if h.state.CurrentChapterIndex > lastIdx {
-		h.state.CurrentChapterIndex = lastIdx
 	}
 
 	if err := SaveProgress(h.progressPath, h.state); err != nil {
@@ -938,7 +1065,7 @@ func (h *Handlers) DeleteChapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.SuccessKey("log.chapter_deleted", ch.Num)
+	h.logger.SuccessKey("log.chapter_deleted", num)
 	h.writeJSON(w, http.StatusOK, h.state)
 }
 
@@ -1028,7 +1155,7 @@ func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request)
 		ctx := h.taskCtx
 
 		h.logger.InfoKey("log.settings_reconciling")
-		err := ReconcileSettingsAction(ctx, h.apiCfg, h.cfg, h.state, body, h.progressPath, h.cfgPath, h.logger)
+		err := ReconcileSettingsAction(ctx, h.apiCfg, h.cfg, h.state, body, h.settings, h.progressPath, h.cfgPath, h.logger)
 
 		if err != nil {
 			if ctx.Err() != nil {
@@ -1502,7 +1629,7 @@ func (h *Handlers) PostOutlineGenerateContinuation(w http.ResponseWriter, r *htt
 		ctx := h.taskCtx
 
 		h.logger.InfoKey("log.continuation_outline_generating")
-		err := GenerateContinuationOutline(ctx, h.apiCfg, h.cfg, h.state, body.ChapterCount, h.progressPath, h.logger)
+		err := GenerateContinuationOutline(ctx, h.apiCfg, h.cfg, h.state, h.settings, body.ChapterCount, h.progressPath, h.logger)
 
 		if err != nil {
 			if ctx.Err() != nil {

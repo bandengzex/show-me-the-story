@@ -113,56 +113,58 @@ func buildHistorySummaryForLang(state *Progress, idx int, lang string) string {
 
 // buildCharacterContextForLang returns structured character details injected into writing prompts.
 func buildCharacterContextForLang(settings *ProjectSettings, chapterOutline, lang string) string {
-	if settings == nil || len(settings.Characters) == 0 {
-		return ""
-	}
-
-	var relevant []Character
-	for _, c := range settings.Characters {
-		if strings.Contains(chapterOutline, c.Name) {
-			relevant = append(relevant, c)
-		}
-	}
-	if len(relevant) == 0 {
-		relevant = settings.Characters
-	}
-
-	en := NormalizeLanguage(lang) == LangEN
 	var sb strings.Builder
-	for _, c := range relevant {
-		sb.WriteString(fmt.Sprintf("【%s】", c.Name))
-		if c.Age != "" {
+
+	if settings != nil && len(settings.Characters) > 0 {
+		var relevant []Character
+		for _, c := range settings.Characters {
+			if strings.Contains(chapterOutline, stripNameMarks(c.Name)) {
+				relevant = append(relevant, c)
+			}
+		}
+		if len(relevant) == 0 {
+			relevant = settings.Characters
+		}
+
+		en := NormalizeLanguage(lang) == LangEN
+		for _, c := range relevant {
+			sb.WriteString(fmt.Sprintf("【%s】", c.Name))
+			if c.Age != "" {
+				if en {
+					sb.WriteString(fmt.Sprintf(" Age: %s", c.Age))
+				} else {
+					sb.WriteString(fmt.Sprintf(" 年龄:%s", c.Age))
+				}
+			}
+			sb.WriteString("\n")
+			write := func(label, val string) {
+				if val == "" {
+					return
+				}
+				sb.WriteString(fmt.Sprintf("  %s: %s\n", label, val))
+			}
 			if en {
-				sb.WriteString(fmt.Sprintf(" Age: %s", c.Age))
+				write("Appearance", c.Appearance)
+				write("Personality", c.Personality)
+				write("Background", c.Background)
+				write("Motivation", c.Motivation)
+				write("Abilities", c.Abilities)
+				write("Notes", c.Notes)
 			} else {
-				sb.WriteString(fmt.Sprintf(" 年龄:%s", c.Age))
+				write("外貌", c.Appearance)
+				write("性格", c.Personality)
+				write("背景", c.Background)
+				write("动机", c.Motivation)
+				write("能力", c.Abilities)
+				write("备注", c.Notes)
 			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
-		write := func(label, val string) {
-			if val == "" {
-				return
-			}
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", label, val))
-		}
-		if en {
-			write("Appearance", c.Appearance)
-			write("Personality", c.Personality)
-			write("Background", c.Background)
-			write("Motivation", c.Motivation)
-			write("Abilities", c.Abilities)
-			write("Notes", c.Notes)
-		} else {
-			write("外貌", c.Appearance)
-			write("性格", c.Personality)
-			write("背景", c.Background)
-			write("动机", c.Motivation)
-			write("能力", c.Abilities)
-			write("备注", c.Notes)
-		}
-		sb.WriteString("\n")
 	}
 
+	if derived := buildOutlineDerivedCharacterContext(chapterOutline, settings, lang); derived != "" {
+		sb.WriteString(derived)
+	}
 	return sb.String()
 }
 
@@ -215,6 +217,85 @@ func buildWorldviewContextForLang(settings *ProjectSettings, chapterOutline, lan
 		}
 	}
 
+	return sb.String()
+}
+
+// buildMemoryForLang renders the memory block for injection into writing/fact-check prompts.
+func buildMemoryForLang(state *Progress, idx int, lang string) string {
+	if len(state.MemoryEntries) == 0 {
+		return ""
+	}
+	en := NormalizeLanguage(lang) == LangEN
+	var sb strings.Builder
+	if en {
+		sb.WriteString("【Story Memory — long-term narrative details from earlier chapters】\n")
+	} else {
+		sb.WriteString("【叙事记忆——早期章节的关键叙事细节】\n")
+	}
+	for _, m := range state.MemoryEntries {
+		snippet := extractSnippet(state, m.Chapter, m.Position, 100)
+		if snippet != "" {
+			if en {
+				sb.WriteString(fmt.Sprintf("[Ch.%d] %s (original: \"%s\")\n", m.Chapter, m.Content, snippet))
+			} else {
+				sb.WriteString(fmt.Sprintf("[第%d章] %s（原文：「%s」）\n", m.Chapter, m.Content, snippet))
+			}
+		} else {
+			if en {
+				sb.WriteString(fmt.Sprintf("[Ch.%d] %s\n", m.Chapter, m.Content))
+			} else {
+				sb.WriteString(fmt.Sprintf("[第%d章] %s\n", m.Chapter, m.Content))
+			}
+		}
+	}
+	return sb.String()
+}
+
+// extractSnippet extracts approximately maxRunes characters from the chapter content
+// starting at the given paragraph position (1-indexed, split by double newlines).
+func extractSnippet(state *Progress, chapterNum, position, maxRunes int) string {
+	if position <= 0 || chapterNum <= 0 {
+		return ""
+	}
+	for i := range state.Chapters {
+		if state.Chapters[i].Num == chapterNum {
+			content := state.Chapters[i].Content
+			if content == "" {
+				return ""
+			}
+			paragraphs := strings.Split(content, "\n\n")
+			idx := position - 1
+			if idx < 0 || idx >= len(paragraphs) {
+				return ""
+			}
+			para := strings.TrimSpace(paragraphs[idx])
+			runes := []rune(para)
+			if len(runes) > maxRunes {
+				return string(runes[:maxRunes]) + "…"
+			}
+			return para
+		}
+	}
+	return ""
+}
+
+// formatMemoryForUpdatePrompt renders the existing memory list for the memory update prompt.
+func formatMemoryForUpdatePrompt(entries []MemoryEntry, lang string) string {
+	if len(entries) == 0 {
+		if NormalizeLanguage(lang) == LangEN {
+			return "(empty — no memories yet)"
+		}
+		return "（空——尚无记忆）"
+	}
+	en := NormalizeLanguage(lang) == LangEN
+	var sb strings.Builder
+	for _, m := range entries {
+		if en {
+			sb.WriteString(fmt.Sprintf("#%d [%s] Ch.%d: %s\n", m.ID, m.Category, m.Chapter, m.Content))
+		} else {
+			sb.WriteString(fmt.Sprintf("#%d [%s] 第%d章: %s\n", m.ID, m.Category, m.Chapter, m.Content))
+		}
+	}
 	return sb.String()
 }
 
