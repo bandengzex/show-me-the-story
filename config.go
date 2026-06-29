@@ -51,6 +51,7 @@ type PromptsConfig struct {
 	OutlineGeneration             string `json:"outline_generation"`
 	ChapterWriting                string `json:"chapter_writing"`
 	ChapterRevision               string `json:"chapter_revision"`
+	ChapterSegmentRevision        string `json:"chapter_segment_revision"`
 	ChapterSummary                string `json:"chapter_summary"`
 	FactCheck                     string `json:"fact_check"`
 	OutlineRevision               string `json:"outline_revision"`
@@ -205,6 +206,9 @@ func (p *PromptsConfig) applyDefaults(lang string) {
 	}
 	if p.ChapterRevision == "" {
 		p.ChapterRevision = defaults.ChapterRevision
+	}
+	if p.ChapterSegmentRevision == "" {
+		p.ChapterSegmentRevision = defaults.ChapterSegmentRevision
 	}
 	if p.ChapterSummary == "" {
 		p.ChapterSummary = defaults.ChapterSummary
