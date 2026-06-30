@@ -9,6 +9,7 @@ import (
 type APIConfig struct {
 	APIKey               string `json:"api_key"`
 	BaseURL              string `json:"base_url"`
+	URLStrict            bool   `json:"url_strict,omitempty"` // true = 不自动插入 /v1，仅补 /chat/completions
 	Model                string `json:"model"`
 	MaxTokens            int    `json:"max_tokens,omitempty"`           // 0 = 模型默认；Agent 调用建议 ≥ 8192
 	HTTPTimeoutSeconds   int    `json:"http_timeout_seconds"`
@@ -86,8 +87,8 @@ func DefaultConfigForLang(lang string) *Config {
 	cfg := &Config{
 		Language: lang,
 		Story: StoryConfig{
-			ChapterCount:          30,
-			TargetWordsPerChapter: 2500,
+		ChapterCount:          12,
+		TargetWordsPerChapter: 5000,
 		},
 		SkillConfig: &SkillConfig{
 			EnabledSkills: make(map[string]bool),
@@ -157,10 +158,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	if cfg.Story.ChapterCount <= 0 {
-		cfg.Story.ChapterCount = 30
+		cfg.Story.ChapterCount = 12
 	}
 	if cfg.Story.TargetWordsPerChapter <= 0 {
-		cfg.Story.TargetWordsPerChapter = 2500
+		cfg.Story.TargetWordsPerChapter = 5000
 	}
 
 	cfg.Language = NormalizeLanguage(cfg.Language)
