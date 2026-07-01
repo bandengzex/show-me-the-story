@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { api } from '../lib/api.js';
   import { apiConfig, config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
@@ -40,7 +40,7 @@
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', writing_pov: '', story_synopsis: '' };
   let testingApi = false;
   let selectedProvider = 'custom';
-  let selectedModel = '';
+  let providerSynced = false;
 
   const apiProviders = [
     { id: 'custom', label: '自定义', base_url: '', models: [] },
@@ -65,31 +65,27 @@
     return 'custom';
   }
 
-  function onProviderChange() {
-    const p = apiProviders.find(x => x.id === selectedProvider);
-    if (!p || p.id === 'custom') return;
+  function onProviderChange(e) {
+    const pid = e.currentTarget.value;
+    console.log('[DEBUG] Selected provider ID:', pid);
+    selectedProvider = pid;
+    const p = apiProviders.find(x => x.id === pid);
+    if (!p || p.id === 'custom') {
+      console.log('[DEBUG] Custom provider or not found, skipping update');
+      return;
+    }
+    console.log('[DEBUG] Updating base_url to:', p.base_url);
     localApiCfg.base_url = p.base_url;
+    console.log('[DEBUG] localApiCfg.base_url after update:', localApiCfg.base_url);
     if (p.models.length > 0 && !p.models.includes(localApiCfg.model)) {
       localApiCfg.model = p.models[0];
+      console.log('[DEBUG] Updating model to:', localApiCfg.model);
     }
-    selectedModel = localApiCfg.model;
-  }
-
-  function onModelChange() {
-    localApiCfg.model = selectedModel;
   }
 
   function syncProviderFromUrl() {
     const pid = detectProvider(localApiCfg.base_url);
     selectedProvider = pid;
-    if (pid !== 'custom') {
-      const p = apiProviders.find(x => x.id === pid);
-      selectedModel = (p && p.models.length > 0 && p.models.includes(localApiCfg.model))
-        ? localApiCfg.model
-        : (p?.models[0] || '');
-    } else {
-      selectedModel = localApiCfg.model;
-    }
   }
 
   $: currentProviderModels = (apiProviders.find(p => p.id === selectedProvider)?.models || []);
@@ -108,6 +104,10 @@
         url_strict: !!$apiConfig.url_strict,
       };
       apiCfgSnapshot = snap;
+      if (!providerSynced) {
+        providerSynced = true;
+        setTimeout(() => syncProviderFromUrl(), 0);
+      }
     }
   }
   $: if ($config?.story) {
@@ -454,14 +454,13 @@
           </div>
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} list="model-suggestions" placeholder="gpt-4" disabled={$taskRunning || testingApi} />
             {#if currentProviderModels.length > 0}
-              <select class="select select-sm w-full" bind:value={selectedModel} on:change={onModelChange} disabled={$taskRunning || testingApi}>
+              <datalist id="model-suggestions">
                 {#each currentProviderModels as m}
                   <option value={m}>{m}</option>
                 {/each}
-              </select>
-            {:else}
-              <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
+              </datalist>
             {/if}
           </div>
           <div>
